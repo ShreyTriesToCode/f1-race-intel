@@ -1,0 +1,77 @@
+{
+  "trained_at": "2026-05-04T05:13:11.652929+05:30",
+  "ml_start_year": 2018,
+  "rows_raw": 200,
+  "rows_features": 140,
+  "latest_completed_race_id": "2026-3",
+  "metrics": {
+    "win": {
+      "auc": 1.0,
+      "brier": 0.025295640892152506,
+      "validation_rows": 28
+    },
+    "podium": {
+      "auc": 0.8843537414965986,
+      "brier": 0.11671407526066599,
+      "validation_rows": 28
+    },
+    "top10": {
+      "auc": 0.8826530612244898,
+      "brier": 0.13559273540941502,
+      "validation_rows": 28
+    }
+  },
+  "feature_columns": [
+    "grid_position",
+    "qualifying_position",
+    "sprint_position",
+    "driver_avg_finish",
+    "driver_median_finish",
+    "driver_avg_points",
+    "driver_win_rate",
+    "driver_podium_rate",
+    "driver_top10_rate",
+    "driver_finish_rate",
+    "driver_recent3_finish",
+    "driver_recent5_points",
+    "driver_recent5_podium_rate",
+    "team_avg_finish",
+    "team_avg_points",
+    "team_win_rate",
+    "team_podium_rate",
+    "team_top10_rate",
+    "team_finish_rate",
+    "team_recent_points",
+    "driver_circuit_avg_finish",
+    "driver_circuit_podium_rate",
+    "team_circuit_avg_finish",
+    "team_circuit_podium_rate",
+    "career_starts",
+    "team_starts",
+    "circuit_experience",
+    "driver_lap_pace",
+    "driver_lap_consistency",
+    "driver_valid_laps",
+    "driver_pit_duration",
+    "driver_pit_stop_count",
+    "team_pit_duration",
+    "team_pit_stop_count",
+    "track_avg_pit_stops",
+    "track_avg_lap_consistency",
+    "track_dnf_rate",
+    "track_overtake_proxy"
+  ],
+  "backfill_used_this_run": 10,
+  "backfilled_races_this_run": [
+    "2018-1",
+    "2018-2",
+    "2018-3",
+    "2018-4",
+    "2018-5",
+    "2018-6",
+    "2018-7",
+    "2018-8",
+    "2018-9",
+    "2018-10"
+  ]
+}
