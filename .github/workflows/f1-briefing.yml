@@ -1,10 +1,8 @@
-name: F1 Briefing, ML Retrain, Issue, Email
+name: F1 Briefing, Full Data Backfill, ML Retrain, Issue, Email
 
 on:
   schedule:
-    # Daily normal update
     - cron: "30 3 * * *"
-    # Race-weekend refresh: every 6 hours from Thursday to Sunday
     - cron: "0 */6 * * 4,5,6,0"
   workflow_dispatch:
     inputs:
@@ -12,6 +10,10 @@ on:
         description: "Force retrain ML model"
         required: false
         default: "false"
+      full_data_backfill_limit:
+        description: "How many uncached full historical races to fetch this run"
+        required: false
+        default: "10"
       lookahead_days:
         description: "How many days ahead to search for F1 calendar events"
         required: false
@@ -27,13 +29,13 @@ permissions:
   actions: read
 
 concurrency:
-  group: f1-briefing-bot
+  group: f1-race-intel
   cancel-in-progress: false
 
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repo
@@ -49,35 +51,22 @@ jobs:
           cache: "pip"
           cache-dependency-path: "requirements.txt"
 
-      - name: Restore FastF1 and model caches
+      - name: Restore runtime caches
         uses: actions/cache@v4
         with:
           path: |
             fastf1_cache
             data_cache/http
-          key: f1-data-cache-${{ runner.os }}-${{ hashFiles('f1_briefing.py') }}
+          key: f1-runtime-cache-${{ runner.os }}-${{ hashFiles('f1_briefing.py') }}
           restore-keys: |
-            f1-data-cache-${{ runner.os }}-
+            f1-runtime-cache-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Test free API access
-        run: |
-          python - <<'PY'
-          import requests
-          for url in [
-              "https://api.jolpi.ca/ergast/f1/current.json",
-              "https://api.open-meteo.com/v1/forecast?latitude=25.9581&longitude=-80.2389&current=temperature_2m"
-          ]:
-              r = requests.get(url, timeout=25)
-              print(url, r.status_code, r.text[:120].replace("\n", " "))
-              r.raise_for_status()
-          PY
-
-      - name: Generate briefing and retrain if needed
+      - name: Run F1 hybrid briefing
         env:
           F1_ICS_URL: ${{ secrets.F1_ICS_URL }}
           EMAIL_ENABLED: ${{ github.event.inputs.send_email || 'true' }}
@@ -90,8 +79,12 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           FORCE_RETRAIN: ${{ github.event.inputs.force_retrain || 'false' }}
           ML_START_YEAR: "2018"
+          USE_FULL_HISTORICAL_DATA: "true"
+          FULL_DATA_BACKFILL_LIMIT: ${{ github.event.inputs.full_data_backfill_limit || '10' }}
+          JOLPICA_REQUEST_SLEEP: "1.2"
           MODEL_DIR: "models/saved_models"
           HTTP_CACHE_DIR: "data_cache/http"
+          FULL_RACE_CACHE_DIR: "data_cache/full_races"
           FASTF1_CACHE_DIR: "fastf1_cache"
         run: python f1_briefing.py
 
@@ -99,9 +92,10 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: f1-briefing-output
+          name: f1-race-intel-output
           path: |
             briefings/**
             data_cache/latest-model-debug.json
+            data_cache/full_races/**
             models/saved_models/**
           if-no-files-found: ignore

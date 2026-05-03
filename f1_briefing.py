@@ -2,7 +2,7 @@ import os
 import re
 import json
 import time
-import math
+import gzip
 import smtplib
 import argparse
 import subprocess
@@ -17,20 +17,14 @@ import pandas as pd
 import requests
 from icalendar import Calendar
 from dateutil import tz
+from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
+from sklearn.metrics import roc_auc_score, brier_score_loss
 
 try:
     import fastf1
 except Exception:
     fastf1 = None
 
-from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
-from sklearn.calibration import CalibratedClassifierCV
-from sklearn.metrics import roc_auc_score, brier_score_loss
-
-
-# -----------------------------
-# Configuration
-# -----------------------------
 
 F1_ICS_URL = os.getenv("F1_ICS_URL", "").strip()
 
@@ -44,23 +38,27 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 
 USER_TIMEZONE_NAME = os.getenv("USER_TIMEZONE", "Asia/Kolkata")
 USER_TIMEZONE = tz.gettz(USER_TIMEZONE_NAME) or timezone.utc
-
 LOOKAHEAD_DAYS = int(os.getenv("LOOKAHEAD_DAYS", "90"))
+
 ML_START_YEAR = int(os.getenv("ML_START_YEAR", "2018"))
+USE_FULL_HISTORICAL_DATA = os.getenv("USE_FULL_HISTORICAL_DATA", "true").lower() == "true"
+FULL_DATA_BACKFILL_LIMIT = int(os.getenv("FULL_DATA_BACKFILL_LIMIT", "10"))
+JOLPICA_REQUEST_SLEEP = float(os.getenv("JOLPICA_REQUEST_SLEEP", "1.2"))
 
 BASE_DIR = Path(__file__).resolve().parent
 BRIEFINGS_DIR = BASE_DIR / "briefings"
 DATA_CACHE_DIR = BASE_DIR / "data_cache"
 HTTP_CACHE_DIR = Path(os.getenv("HTTP_CACHE_DIR", DATA_CACHE_DIR / "http"))
+FULL_RACE_CACHE_DIR = Path(os.getenv("FULL_RACE_CACHE_DIR", DATA_CACHE_DIR / "full_races"))
 FASTF1_CACHE_DIR = Path(os.getenv("FASTF1_CACHE_DIR", BASE_DIR / "fastf1_cache"))
 MODEL_DIR = Path(os.getenv("MODEL_DIR", BASE_DIR / "models" / "saved_models"))
 
-MODEL_BUNDLE_PATH = MODEL_DIR / "f1_hybrid_ml_bundle.pkl"
-MODEL_META_PATH = MODEL_DIR / "f1_hybrid_ml_meta.json"
+MODEL_BUNDLE_PATH = MODEL_DIR / "f1_hybrid_full_data_bundle.pkl"
+MODEL_META_PATH = MODEL_DIR / "f1_hybrid_full_data_meta.json"
 
 JOLPICA_BASE = "https://api.jolpi.ca/ergast/f1"
 JOLPICA_HEADERS = {
-    "User-Agent": "f1-briefing-bot/2.0 (free-data ML hybrid; GitHub Actions)",
+    "User-Agent": "f1-race-intel/3.0 cache-first full-data model",
     "Accept": "application/json",
 }
 
@@ -71,55 +69,50 @@ PREDICTION_LABELS = {
     "ml_podium_probability": "ML podium probability",
     "ml_top10_probability": "ML top 10 probability",
     "driver_form": "driver form",
+    "driver_skill": "driver skill profile",
     "car_performance": "car performance",
+    "constructor_form": "constructor form",
     "recent_result": "recent race result",
     "qualifying": "qualifying and grid position",
     "circuit_history": "same-circuit history",
-    "race_pace": "race pace",
+    "race_pace": "historical lap pace",
     "pit_execution": "pit-stop execution",
-    "team_strategy": "team strategy and recovery",
+    "team_strategy": "team strategy gain",
     "reliability": "reliability",
     "team_track_fit": "team-track fit",
     "weather_adaptation": "weather adaptation",
-    "fastf1_race_pace": "FastF1 session pace",
+    "track_trait_fit": "track trait fit",
+    "sprint_performance": "sprint performance",
+    "fastf1_race_pace": "FastF1 clean-lap pace",
     "fastf1_consistency": "FastF1 consistency",
     "fastf1_tyre_stint": "FastF1 tyre/stint evidence",
 }
 
 
-# -----------------------------
-# Generic helpers
-# -----------------------------
+class BackfillBudget:
+    def __init__(self, limit):
+        self.limit = int(limit)
+        self.used = 0
+        self.fetched = []
+
+    def can_fetch(self):
+        return self.used < self.limit
+
+    def mark(self, key):
+        self.used += 1
+        self.fetched.append(key)
+
+
+BACKFILL_BUDGET = BackfillBudget(FULL_DATA_BACKFILL_LIMIT)
+
 
 def ensure_dirs():
-    for path in [BRIEFINGS_DIR, DATA_CACHE_DIR, HTTP_CACHE_DIR, FASTF1_CACHE_DIR, MODEL_DIR]:
+    for path in [BRIEFINGS_DIR, DATA_CACHE_DIR, HTTP_CACHE_DIR, FULL_RACE_CACHE_DIR, FASTF1_CACHE_DIR, MODEL_DIR]:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def require_env_vars():
-    missing = []
-    if not F1_ICS_URL:
-        missing.append("F1_ICS_URL")
-
-    if EMAIL_ENABLED:
-        for key, value in {
-            "EMAIL_ADDRESS": EMAIL_ADDRESS,
-            "EMAIL_APP_PASSWORD": EMAIL_APP_PASSWORD,
-            "EMAIL_TO": EMAIL_TO,
-        }.items():
-            if not value:
-                missing.append(key)
-
-    if missing:
-        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
-
-
-def safe_step(name, function, *args, **kwargs):
-    try:
-        return function(*args, **kwargs)
-    except Exception as error:
-        print(f"{name} failed, but workflow will continue: {error}")
-        return None
+def now_local():
+    return datetime.now(USER_TIMEZONE)
 
 
 def safe_float(value):
@@ -149,8 +142,8 @@ def average(values):
 
 
 def weighted_average(items):
-    total = 0
-    weight_sum = 0
+    total = 0.0
+    weight_sum = 0.0
     for value, weight in items:
         value = safe_float(value)
         if value is None:
@@ -158,17 +151,6 @@ def weighted_average(items):
         total += value * weight
         weight_sum += weight
     return total / weight_sum if weight_sum else None
-
-
-def normalize_name(name):
-    text = str(name or "").replace("_", " ").strip()
-    return " ".join(word.capitalize() if word.isupper() else word for word in text.split())
-
-
-def make_slug(text):
-    text = str(text or "").lower()
-    text = re.sub(r"[^a-z0-9]+", "-", text)
-    return text.strip("-")[:90] or "f1-briefing"
 
 
 def normalize_scores(raw, reverse=False):
@@ -186,19 +168,30 @@ def normalize_scores(raw, reverse=False):
         if value is None:
             continue
         if high == low:
-            out[key] = 75
+            out[key] = 75.0
         elif reverse:
-            out[key] = max(0, min(100, (high - value) / (high - low) * 100))
+            out[key] = max(0.0, min(100.0, (high - value) / (high - low) * 100.0))
         else:
-            out[key] = max(0, min(100, (value - low) / (high - low) * 100))
+            out[key] = max(0.0, min(100.0, (value - low) / (high - low) * 100.0))
     return out
+
+
+def normalize_name(name):
+    text = str(name or "").replace("_", " ").strip()
+    return " ".join(part.capitalize() if part.isupper() else part for part in text.split())
+
+
+def make_slug(text):
+    text = str(text or "").lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")[:100] or "f1"
 
 
 def score_position(position, field_size=22):
     position = safe_int(position)
     if position is None or position <= 0:
         return None
-    return max(0, 100 * (field_size - position) / max(1, field_size - 1))
+    return max(0.0, 100.0 * (field_size - position) / max(1, field_size - 1))
 
 
 def parse_lap_time_to_seconds(value):
@@ -218,17 +211,37 @@ def parse_lap_time_to_seconds(value):
     return None
 
 
-def now_local():
-    return datetime.now(USER_TIMEZONE)
+def require_env_vars():
+    missing = []
+    if not F1_ICS_URL:
+        missing.append("F1_ICS_URL")
+    if EMAIL_ENABLED:
+        for key, value in {
+            "EMAIL_ADDRESS": EMAIL_ADDRESS,
+            "EMAIL_APP_PASSWORD": EMAIL_APP_PASSWORD,
+            "EMAIL_TO": EMAIL_TO,
+        }.items():
+            if not value:
+                missing.append(key)
+    if missing:
+        raise RuntimeError("Missing required environment variables: " + ", ".join(missing))
 
 
-# -----------------------------
-# HTTP and Jolpica
-# -----------------------------
+def safe_step(name, fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except Exception as error:
+        print(f"{name} failed, continuing: {error}")
+        return None
+
 
 def cache_key_for_url(url, params=None):
-    raw = url + "?" + json.dumps(params or {}, sort_keys=True)
-    return make_slug(raw)
+    return make_slug(url + "?" + json.dumps(params or {}, sort_keys=True))
+
+
+def polite_sleep():
+    if JOLPICA_REQUEST_SLEEP > 0:
+        time.sleep(JOLPICA_REQUEST_SLEEP)
 
 
 def safe_get(url, params=None, timeout=30, headers=None, optional_404=False, use_cache=True):
@@ -238,16 +251,15 @@ def safe_get(url, params=None, timeout=30, headers=None, optional_404=False, use
     if use_cache and cache_path.exists():
         try:
             age = time.time() - cache_path.stat().st_mtime
-            if age < 6 * 3600:
-                text = cache_path.read_text(encoding="utf-8")
+            if age < 12 * 3600:
                 fake = requests.Response()
                 fake.status_code = 200
-                fake._content = text.encode("utf-8")
+                fake._content = cache_path.read_bytes()
                 return fake
         except Exception:
             pass
 
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             response = requests.get(url, params=params or {}, headers=headers or {}, timeout=timeout)
 
@@ -256,21 +268,21 @@ def safe_get(url, params=None, timeout=30, headers=None, optional_404=False, use
                 return None
 
             if response.status_code == 429:
-                wait = 3 + attempt * 3
+                wait = 5 + attempt * 5
                 print(f"Rate limited. Waiting {wait}s before retry.")
                 time.sleep(wait)
                 continue
 
             response.raise_for_status()
 
-            if use_cache and response.headers.get("content-type", "").lower().find("json") >= 0:
-                cache_path.write_text(response.text, encoding="utf-8")
+            if use_cache and "json" in response.headers.get("content-type", "").lower():
+                cache_path.write_bytes(response.content)
 
             return response
         except Exception as error:
-            print(f"GET failed: {url} params={params} attempt={attempt + 1}/3 error={error}")
-            if attempt < 2:
-                time.sleep(1.5 + attempt)
+            print(f"GET failed: {url} params={params} attempt={attempt + 1}/4 error={error}")
+            if attempt < 3:
+                time.sleep(2 + attempt * 2)
 
     return None
 
@@ -281,22 +293,15 @@ def jolpica_get(endpoint, params=None, optional_404=False):
     if not endpoint.endswith(".json"):
         endpoint += ".json"
 
-    response = safe_get(
-        JOLPICA_BASE + endpoint,
-        params=params,
-        headers=JOLPICA_HEADERS,
-        optional_404=optional_404,
-        timeout=30,
-    )
+    polite_sleep()
+    response = safe_get(JOLPICA_BASE + endpoint, params=params, headers=JOLPICA_HEADERS, optional_404=optional_404)
     if not response:
         return {}
-
     try:
         data = response.json()
     except json.JSONDecodeError:
         print(f"Jolpica returned non-JSON for {endpoint}")
         return {}
-
     print(f"Jolpica OK: {endpoint}")
     return data
 
@@ -312,7 +317,7 @@ def mrdata_standing_list(data):
     try:
         lists = data.get("MRData", {}).get("StandingsTable", {}).get("StandingsLists", [])
         return lists[0] if lists else {}
-    except (AttributeError, IndexError):
+    except Exception:
         return {}
 
 
@@ -320,12 +325,47 @@ def fetch_schedule(year):
     return mrdata_list(jolpica_get(f"/{year}"), "RaceTable", "Races")
 
 
-def fetch_round_data(season, round_no):
+def parse_race_datetime(race):
+    date = race.get("date")
+    time_value = race.get("time") or "00:00:00Z"
+    if not date:
+        return None
+    try:
+        return datetime.fromisoformat(f"{date}T{time_value}".replace("Z", "+00:00")).astimezone(USER_TIMEZONE)
+    except ValueError:
+        return None
+
+
+def full_race_cache_path(season, round_no):
+    return FULL_RACE_CACHE_DIR / f"{season}-{round_no}.json.gz"
+
+
+def read_full_race_cache(season, round_no):
+    path = full_race_cache_path(season, round_no)
+    if not path.exists():
+        return None
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as error:
+        print(f"Could not read full race cache {path}: {error}")
+        return None
+
+
+def write_full_race_cache(season, round_no, payload):
+    path = full_race_cache_path(season, round_no)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    return path
+
+
+def fetch_round_data_direct(season, round_no):
     return {
         "results": mrdata_list(jolpica_get(f"/{season}/{round_no}/results"), "RaceTable", "Races"),
-        "qualifying": mrdata_list(jolpica_get(f"/{season}/{round_no}/qualifying"), "RaceTable", "Races"),
-        "pitstops": mrdata_list(jolpica_get(f"/{season}/{round_no}/pitstops"), "RaceTable", "Races"),
-        "laps": mrdata_list(jolpica_get(f"/{season}/{round_no}/laps"), "RaceTable", "Races"),
+        "qualifying": mrdata_list(jolpica_get(f"/{season}/{round_no}/qualifying", optional_404=True), "RaceTable", "Races"),
+        "pitstops": mrdata_list(jolpica_get(f"/{season}/{round_no}/pitstops", optional_404=True), "RaceTable", "Races"),
+        "laps": mrdata_list(jolpica_get(f"/{season}/{round_no}/laps", optional_404=True), "RaceTable", "Races"),
         "sprint": mrdata_list(jolpica_get(f"/{season}/{round_no}/sprint", optional_404=True), "RaceTable", "Races"),
         "sprint_qualifying": mrdata_list(
             jolpica_get(f"/{season}/{round_no}/sprint/qualifying", optional_404=True),
@@ -333,6 +373,32 @@ def fetch_round_data(season, round_no):
             "Races",
         ),
     }
+
+
+def fetch_round_data_cached(season, round_no, allow_backfill=True, force_fetch=False):
+    cached = read_full_race_cache(season, round_no)
+    if cached and not force_fetch:
+        return cached.get("data", {})
+
+    key = f"{season}-{round_no}"
+    if allow_backfill and not force_fetch and not BACKFILL_BUDGET.can_fetch():
+        print(f"Full-data backfill limit reached. Skipping uncached historical race {key}.")
+        return {}
+
+    print(f"Fetching full round data for {key}")
+    data = fetch_round_data_direct(season, round_no)
+    payload = {
+        "season": season,
+        "round": str(round_no),
+        "fetched_at": now_local().isoformat(),
+        "data": data,
+    }
+    write_full_race_cache(season, round_no, payload)
+
+    if allow_backfill and not force_fetch:
+        BACKFILL_BUDGET.mark(key)
+
+    return data
 
 
 def fetch_driver_standings(season):
@@ -352,27 +418,12 @@ def fetch_last_results(season):
     return races[0].get("Results", []) if races else []
 
 
-def parse_race_datetime(race):
-    date = race.get("date")
-    time_value = race.get("time") or "00:00:00Z"
-    if not date:
-        return None
-    try:
-        return datetime.fromisoformat(f"{date}T{time_value}".replace("Z", "+00:00")).astimezone(USER_TIMEZONE)
-    except ValueError:
-        return None
-
-
-# -----------------------------
-# Calendar
-# -----------------------------
-
 def fetch_ics_calendar():
     url = F1_ICS_URL.strip().strip('"').strip("'")
     if url.startswith("webcal://"):
         url = "https://" + url.replace("webcal://", "", 1)
     if not url.startswith(("http://", "https://")):
-        raise RuntimeError("F1_ICS_URL must be an HTTP URL, not webcal or secret mask.")
+        raise RuntimeError("F1_ICS_URL must be a normal HTTP URL.")
     response = requests.get(url, timeout=30)
     response.raise_for_status()
     return Calendar.from_ical(response.content)
@@ -392,7 +443,6 @@ def find_next_calendar_event(calendar):
     now = now_local()
     max_date = now + timedelta(days=LOOKAHEAD_DAYS)
     events = []
-
     for component in calendar.walk():
         if component.name != "VEVENT":
             continue
@@ -405,12 +455,10 @@ def find_next_calendar_event(calendar):
             continue
         start = normalize_datetime(start_raw.dt)
         end = normalize_datetime(end_raw.dt) if end_raw else None
-
         text = f"{title} {location} {description}".lower()
-        looks_like_f1 = any(k in text for k in ["formula 1", "f1", "grand prix", "qualifying", "practice", "sprint", "race"])
-
-        if looks_like_f1 and now <= start <= max_date:
-            events.append({"title": title, "location": location, "description": description, "start": start, "end": end})
+        if any(k in text for k in ["formula 1", "f1", "grand prix", "qualifying", "practice", "sprint", "race"]):
+            if now <= start <= max_date:
+                events.append({"title": title, "location": location, "description": description, "start": start, "end": end})
     events.sort(key=lambda item: item["start"])
     return events[0] if events else None
 
@@ -435,61 +483,712 @@ def race_text(race):
 
 def find_best_race(event):
     event_year = event["start"].year
-    event_tokens = tokenize(f"{event['title']} {event['location']} {event['description']}")
-
-    best_race = None
+    tokens = tokenize(f"{event['title']} {event['location']} {event['description']}")
+    best = None
     best_score = -999
-
     for year in [event_year, event_year - 1]:
         for race in fetch_schedule(year):
             text = race_text(race)
-            score = 0
-            for token in event_tokens:
-                if token in text:
-                    score += 6
-            race_date = parse_race_datetime(race)
-            if race_date:
-                delta_days = abs((race_date.date() - event["start"].date()).days)
+            score = sum(6 for token in tokens if token in text)
+            race_dt = parse_race_datetime(race)
+            if race_dt:
+                delta = abs((race_dt.date() - event["start"].date()).days)
                 if year == event_year:
                     score += 8
-                if delta_days <= 1:
+                if delta <= 1:
                     score += 24
-                elif delta_days <= 7:
+                elif delta <= 7:
                     score += 8
                 else:
-                    score -= min(delta_days, 30)
+                    score -= min(delta, 30)
             if score > best_score:
+                best = race
                 best_score = score
-                best_race = race
-
-    return best_race if best_score >= 5 else None
+    return best if best_score >= 5 else None
 
 
-# -----------------------------
-# Weather
-# -----------------------------
+def driver_name(driver):
+    return normalize_name(f"{driver.get('givenName', '')} {driver.get('familyName', '')}")
+
+
+def standings_to_drivers(driver_standings):
+    drivers = []
+    for row in driver_standings:
+        driver = row.get("Driver", {})
+        constructors = row.get("Constructors", [])
+        team = constructors[0].get("name") if constructors else "Unknown Team"
+        drivers.append({
+            "driver_id": driver.get("driverId"),
+            "name": driver_name(driver),
+            "team": team,
+            "points": safe_float(row.get("points")) or 0.0,
+            "position": safe_int(row.get("position")),
+            "wins": safe_int(row.get("wins")) or 0,
+            "image": None,
+            "team_colour": None,
+        })
+    return drivers
+
+
+def result_rows_from_race_data(season, round_no, race, data):
+    rows = []
+    result_races = data.get("results", [])
+    if not result_races:
+        return rows
+
+    q_positions = {}
+    q_races = data.get("qualifying", [])
+    if q_races:
+        for q in q_races[0].get("QualifyingResults", []):
+            driver_id = q.get("Driver", {}).get("driverId")
+            q_positions[driver_id] = safe_int(q.get("position"))
+
+    sprint_positions = {}
+    sprint_races = data.get("sprint", [])
+    if sprint_races:
+        for s in sprint_races[0].get("SprintResults", []) or sprint_races[0].get("Results", []):
+            driver_id = s.get("Driver", {}).get("driverId")
+            sprint_positions[driver_id] = safe_int(s.get("positionOrder") or s.get("position"))
+
+    lap_metrics = driver_lap_metrics_from_data(data)
+    pit_metrics = pit_metrics_from_data(data)
+
+    race_id = f"{season}-{round_no}"
+    circuit = race.get("Circuit", {})
+    circuit_id = circuit.get("circuitId")
+    race_dt = parse_race_datetime(race)
+
+    for result in result_races[0].get("Results", []):
+        driver = result.get("Driver", {})
+        constructor = result.get("Constructor", {})
+        driver_id = driver.get("driverId")
+        team = constructor.get("name")
+        pos = safe_int(result.get("positionOrder") or result.get("position"))
+        grid = safe_int(result.get("grid"))
+        status = str(result.get("status", ""))
+
+        if not driver_id or not team or not pos:
+            continue
+
+        dm = lap_metrics.get(driver_id, {})
+        pm = pit_metrics.get(driver_id, {})
+
+        rows.append({
+            "race_id": race_id,
+            "season": season,
+            "round": safe_int(round_no),
+            "date": race_dt.isoformat() if race_dt else None,
+            "race_name": race.get("raceName"),
+            "circuit_id": circuit_id,
+            "circuit_name": circuit.get("circuitName"),
+            "driver_id": driver_id,
+            "driver_name": driver_name(driver),
+            "constructor": team,
+            "grid": grid if grid and grid > 0 else q_positions.get(driver_id),
+            "qualifying": q_positions.get(driver_id),
+            "sprint_position": sprint_positions.get(driver_id),
+            "finish_position": pos,
+            "points": safe_float(result.get("points")) or 0.0,
+            "status": status,
+            "is_finished": 1 if ("Finished" in status or "+" in status) else 0,
+            "is_win": 1 if pos == 1 else 0,
+            "is_podium": 1 if pos <= 3 else 0,
+            "is_top10": 1 if pos <= 10 else 0,
+            "best_clean_lap": dm.get("best_lap"),
+            "avg_best_35pct_lap": dm.get("avg_best_35pct"),
+            "lap_consistency": dm.get("consistency"),
+            "valid_laps": dm.get("valid_laps", 0),
+            "pit_stop_count": pm.get("pit_stop_count", 0),
+            "avg_pit_duration": pm.get("avg_pit_duration"),
+            "min_pit_duration": pm.get("min_pit_duration"),
+        })
+    return rows
+
+
+def driver_lap_metrics_from_data(data):
+    raw = {}
+    for race in data.get("laps", []) or []:
+        for lap in race.get("Laps", []):
+            for timing in lap.get("Timings", []):
+                driver_id = timing.get("driverId")
+                sec = parse_lap_time_to_seconds(timing.get("time"))
+                if not driver_id or sec is None:
+                    continue
+                if 45 <= sec <= 180:
+                    raw.setdefault(driver_id, []).append(sec)
+
+    out = {}
+    for driver_id, times in raw.items():
+        if len(times) < 3:
+            continue
+        fastest = min(times)
+        filtered = [x for x in times if x <= fastest + 7.0]
+        filtered = sorted(filtered)
+        if len(filtered) < 3:
+            continue
+        n = max(3, int(len(filtered) * 0.35))
+        sample = filtered[:n]
+        out[driver_id] = {
+            "best_lap": fastest,
+            "avg_best_35pct": average(sample),
+            "consistency": float(np.std(sample)) if len(sample) > 1 else None,
+            "valid_laps": len(filtered),
+        }
+    return out
+
+
+def pit_metrics_from_data(data):
+    raw = {}
+    for race in data.get("pitstops", []) or []:
+        for stop in race.get("PitStops", []):
+            driver_id = stop.get("driverId")
+            duration = safe_float(stop.get("duration"))
+            if not driver_id or duration is None:
+                continue
+            if 1.5 <= duration <= 65:
+                raw.setdefault(driver_id, []).append(duration)
+
+    out = {}
+    for driver_id, durations in raw.items():
+        out[driver_id] = {
+            "pit_stop_count": len(durations),
+            "avg_pit_duration": average(durations),
+            "min_pit_duration": min(durations) if durations else None,
+        }
+    return out
+
+
+def track_traits_from_race_data(data):
+    rows = []
+    result_races = data.get("results", [])
+    if result_races:
+        for row in result_races[0].get("Results", []):
+            grid = safe_int(row.get("grid"))
+            finish = safe_int(row.get("positionOrder") or row.get("position"))
+            status = str(row.get("status", "")).lower()
+            rows.append({"grid": grid, "finish": finish, "status": status})
+
+    overtake_moves = []
+    dnf = 0
+    finished = 0
+    for row in rows:
+        if row["grid"] and row["grid"] > 0 and row["finish"]:
+            overtake_moves.append(abs(row["grid"] - row["finish"]))
+        if "finished" in row["status"] or "+" in row["status"]:
+            finished += 1
+        else:
+            dnf += 1
+
+    pits = pit_metrics_from_data(data)
+    pit_counts = [item.get("pit_stop_count", 0) for item in pits.values()]
+    laps = driver_lap_metrics_from_data(data)
+    consistency = [item.get("consistency") for item in laps.values() if item.get("consistency") is not None]
+
+    return {
+        "avg_grid_finish_movement": average(overtake_moves),
+        "dnf_rate": dnf / max(1, dnf + finished),
+        "avg_pit_stops": average(pit_counts),
+        "avg_lap_consistency": average(consistency),
+        "drivers_with_lap_data": len(laps),
+        "drivers_with_pit_data": len(pits),
+    }
+
+
+def collect_race_rows(start_year, end_year):
+    rows = []
+    races_used = 0
+    races_skipped_uncached = 0
+
+    for year in range(start_year, end_year + 1):
+        print(f"Collecting full historical rows for {year}")
+        schedule = fetch_schedule(year)
+
+        for race in schedule:
+            round_no = race.get("round")
+            if not round_no:
+                continue
+
+            data = fetch_round_data_cached(
+                year,
+                round_no,
+                allow_backfill=True,
+                force_fetch=False,
+            )
+
+            if not data or not data.get("results"):
+                races_skipped_uncached += 1
+                continue
+
+            race_rows = result_rows_from_race_data(year, round_no, race, data)
+            rows.extend(race_rows)
+            races_used += 1
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values(["season", "round", "finish_position"]).reset_index(drop=True)
+
+    print(f"Historical full-data races used: {races_used}; skipped/uncached this run: {races_skipped_uncached}; new backfilled: {BACKFILL_BUDGET.used}")
+    return df
+
+
+def create_ml_features(df):
+    if df.empty:
+        return df, []
+
+    df = df.copy()
+    numeric_cols = [
+        "grid", "qualifying", "sprint_position", "finish_position", "points",
+        "best_clean_lap", "avg_best_35pct_lap", "lap_consistency",
+        "valid_laps", "pit_stop_count", "avg_pit_duration", "min_pit_duration"
+    ]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df.get(col), errors="coerce")
+
+    df["grid"] = df["grid"].fillna(20)
+    df["qualifying"] = df["qualifying"].fillna(df["grid"])
+    df["sprint_position"] = df["sprint_position"].fillna(20)
+    df["points"] = df["points"].fillna(0)
+    df["pit_stop_count"] = df["pit_stop_count"].fillna(0)
+    df["valid_laps"] = df["valid_laps"].fillna(0)
+
+    feature_rows = []
+    grouped_driver = {k: g.sort_values(["season", "round"]) for k, g in df.groupby("driver_id")}
+    grouped_team = {k: g.sort_values(["season", "round"]) for k, g in df.groupby("constructor")}
+    grouped_circuit_driver = {k: g.sort_values(["season", "round"]) for k, g in df.groupby(["circuit_id", "driver_id"])}
+    grouped_circuit_team = {k: g.sort_values(["season", "round"]) for k, g in df.groupby(["circuit_id", "constructor"])}
+    grouped_circuit = {k: g.sort_values(["season", "round"]) for k, g in df.groupby("circuit_id")}
+
+    for _, race in df.iterrows():
+        season = race["season"]
+        round_no = race["round"]
+
+        def before(frame):
+            if frame is None or len(frame) == 0:
+                return pd.DataFrame()
+            return frame[(frame["season"] < season) | ((frame["season"] == season) & (frame["round"] < round_no))]
+
+        d_hist = before(grouped_driver.get(race["driver_id"]))
+        t_hist = before(grouped_team.get(race["constructor"]))
+        cd_hist = before(grouped_circuit_driver.get((race["circuit_id"], race["driver_id"])))
+        ct_hist = before(grouped_circuit_team.get((race["circuit_id"], race["constructor"])))
+        c_hist = before(grouped_circuit.get(race["circuit_id"]))
+
+        if len(d_hist) < 3 or len(t_hist) < 3:
+            continue
+
+        recent3 = d_hist.tail(3)
+        recent5 = d_hist.tail(5)
+        team_recent10 = t_hist.tail(10)
+
+        def mean_or(frame, col, fallback):
+            if len(frame) and col in frame:
+                val = frame[col].mean()
+                if pd.notna(val):
+                    return float(val)
+            return fallback
+
+        features = {
+            "race_id": race["race_id"],
+            "season": season,
+            "round": round_no,
+            "race_name": race["race_name"],
+            "circuit_id": race["circuit_id"],
+            "driver_id": race["driver_id"],
+            "driver_name": race["driver_name"],
+            "constructor": race["constructor"],
+            "finish_position": race["finish_position"],
+            "is_win": race["is_win"],
+            "is_podium": race["is_podium"],
+            "is_top10": race["is_top10"],
+
+            "grid_position": race["grid"],
+            "qualifying_position": race["qualifying"],
+            "sprint_position": race["sprint_position"],
+
+            "driver_avg_finish": d_hist["finish_position"].mean(),
+            "driver_median_finish": d_hist["finish_position"].median(),
+            "driver_avg_points": d_hist["points"].mean(),
+            "driver_win_rate": d_hist["is_win"].mean(),
+            "driver_podium_rate": d_hist["is_podium"].mean(),
+            "driver_top10_rate": d_hist["is_top10"].mean(),
+            "driver_finish_rate": d_hist["is_finished"].mean(),
+            "driver_recent3_finish": recent3["finish_position"].mean(),
+            "driver_recent5_points": recent5["points"].mean(),
+            "driver_recent5_podium_rate": recent5["is_podium"].mean(),
+
+            "team_avg_finish": t_hist["finish_position"].mean(),
+            "team_avg_points": t_hist["points"].mean(),
+            "team_win_rate": t_hist["is_win"].mean(),
+            "team_podium_rate": t_hist["is_podium"].mean(),
+            "team_top10_rate": t_hist["is_top10"].mean(),
+            "team_finish_rate": t_hist["is_finished"].mean(),
+            "team_recent_points": team_recent10["points"].mean(),
+
+            "driver_circuit_avg_finish": mean_or(cd_hist, "finish_position", d_hist["finish_position"].mean()),
+            "driver_circuit_podium_rate": mean_or(cd_hist, "is_podium", d_hist["is_podium"].mean()),
+            "team_circuit_avg_finish": mean_or(ct_hist, "finish_position", t_hist["finish_position"].mean()),
+            "team_circuit_podium_rate": mean_or(ct_hist, "is_podium", t_hist["is_podium"].mean()),
+
+            "career_starts": len(d_hist),
+            "team_starts": len(t_hist),
+            "circuit_experience": len(cd_hist),
+
+            "driver_lap_pace": mean_or(d_hist.tail(5), "avg_best_35pct_lap", 100),
+            "driver_lap_consistency": mean_or(d_hist.tail(5), "lap_consistency", 3),
+            "driver_valid_laps": mean_or(d_hist.tail(5), "valid_laps", 0),
+            "driver_pit_duration": mean_or(d_hist.tail(5), "avg_pit_duration", 3.5),
+            "driver_pit_stop_count": mean_or(d_hist.tail(5), "pit_stop_count", 1),
+            "team_pit_duration": mean_or(t_hist.tail(10), "avg_pit_duration", 3.5),
+            "team_pit_stop_count": mean_or(t_hist.tail(10), "pit_stop_count", 1),
+            "track_avg_pit_stops": mean_or(c_hist, "pit_stop_count", 1),
+            "track_avg_lap_consistency": mean_or(c_hist, "lap_consistency", 3),
+            "track_dnf_rate": 1 - mean_or(c_hist, "is_finished", 0.85),
+            "track_overtake_proxy": mean_or(c_hist, "grid", 10) - mean_or(c_hist, "finish_position", 10),
+        }
+        feature_rows.append(features)
+
+    feature_df = pd.DataFrame(feature_rows)
+
+    feature_columns = [
+        "grid_position", "qualifying_position", "sprint_position",
+        "driver_avg_finish", "driver_median_finish", "driver_avg_points",
+        "driver_win_rate", "driver_podium_rate", "driver_top10_rate", "driver_finish_rate",
+        "driver_recent3_finish", "driver_recent5_points", "driver_recent5_podium_rate",
+        "team_avg_finish", "team_avg_points", "team_win_rate", "team_podium_rate",
+        "team_top10_rate", "team_finish_rate", "team_recent_points",
+        "driver_circuit_avg_finish", "driver_circuit_podium_rate",
+        "team_circuit_avg_finish", "team_circuit_podium_rate",
+        "career_starts", "team_starts", "circuit_experience",
+        "driver_lap_pace", "driver_lap_consistency", "driver_valid_laps",
+        "driver_pit_duration", "driver_pit_stop_count",
+        "team_pit_duration", "team_pit_stop_count",
+        "track_avg_pit_stops", "track_avg_lap_consistency",
+        "track_dnf_rate", "track_overtake_proxy",
+    ]
+
+    return feature_df, feature_columns
+
+
+def latest_completed_race_id(current_year=None):
+    year = current_year or now_local().year
+    completed = []
+    for race in fetch_schedule(year):
+        race_dt = parse_race_datetime(race)
+        if race_dt and race_dt < now_local() - timedelta(hours=2):
+            data = fetch_round_data_cached(year, race.get("round"), allow_backfill=False)
+            if data.get("results"):
+                completed.append((race_dt, f"{year}-{race.get('round')}"))
+    if not completed and year > 1950:
+        return latest_completed_race_id(year - 1)
+    completed.sort(key=lambda x: x[0])
+    return completed[-1][1] if completed else None
+
+
+def should_retrain(force=False):
+    if force:
+        return True
+    if not MODEL_BUNDLE_PATH.exists() or not MODEL_META_PATH.exists():
+        return True
+    try:
+        meta = json.loads(MODEL_META_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    latest = latest_completed_race_id()
+    return bool(latest and meta.get("latest_completed_race_id") != latest)
+
+
+def train_ml_model(force=False):
+    if not should_retrain(force):
+        print("ML model is current. Skipping retrain.")
+        return load_ml_bundle()
+
+    print("Training full-data ML model from cached/backfilled historical data.")
+    current_year = now_local().year
+    raw_df = collect_race_rows(ML_START_YEAR, current_year)
+
+    raw_path = DATA_CACHE_DIR / "ml_full_race_results_raw.csv"
+    feature_path = DATA_CACHE_DIR / "ml_full_race_features.csv"
+    raw_df.to_csv(raw_path, index=False)
+
+    feature_df, feature_columns = create_ml_features(raw_df)
+    feature_df.to_csv(feature_path, index=False)
+
+    if len(feature_df) < 80:
+        print(f"Not enough full-data feature rows yet: {len(feature_df)}. More backfill runs needed.")
+        return load_ml_bundle()
+
+    seasons = sorted(feature_df["season"].dropna().unique())
+    validation_year = seasons[-1]
+    train_df = feature_df[feature_df["season"] < validation_year].copy()
+    valid_df = feature_df[feature_df["season"] == validation_year].copy()
+
+    if len(train_df) < 60 or len(valid_df) < 20:
+        train_df = feature_df.sample(frac=0.8, random_state=42)
+        valid_df = feature_df.drop(train_df.index)
+
+    X_train = train_df[feature_columns].replace([np.inf, -np.inf], np.nan).fillna(0)
+    X_valid = valid_df[feature_columns].replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    targets = {"win": "is_win", "podium": "is_podium", "top10": "is_top10"}
+    models = {}
+    metrics = {}
+
+    for name, target_col in targets.items():
+        y_train = train_df[target_col].astype(int)
+        y_valid = valid_df[target_col].astype(int)
+
+        rf = RandomForestClassifier(
+            n_estimators=280,
+            max_depth=11,
+            min_samples_leaf=3,
+            random_state=42,
+            n_jobs=-1,
+            class_weight="balanced_subsample",
+        )
+        hgb = HistGradientBoostingClassifier(
+            max_iter=180,
+            learning_rate=0.055,
+            max_leaf_nodes=31,
+            l2_regularization=0.03,
+            random_state=42,
+        )
+
+        rf.fit(X_train, y_train)
+        hgb.fit(X_train, y_train)
+
+        rf_prob = rf.predict_proba(X_valid)[:, 1]
+        hgb_prob = hgb.predict_proba(X_valid)[:, 1]
+        prob = 0.55 * rf_prob + 0.45 * hgb_prob
+
+        try:
+            auc = roc_auc_score(y_valid, prob)
+        except Exception:
+            auc = None
+        try:
+            brier = brier_score_loss(y_valid, prob)
+        except Exception:
+            brier = None
+
+        models[name] = {"rf": rf, "hgb": hgb}
+        metrics[name] = {"auc": auc, "brier": brier, "validation_rows": len(valid_df)}
+
+    latest_id = latest_completed_race_id()
+    bundle = {
+        "models": models,
+        "feature_columns": feature_columns,
+        "trained_at": now_local().isoformat(),
+        "ml_start_year": ML_START_YEAR,
+        "latest_completed_race_id": latest_id,
+        "metrics": metrics,
+    }
+
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    joblib.dump(bundle, MODEL_BUNDLE_PATH)
+
+    meta = {
+        "trained_at": bundle["trained_at"],
+        "ml_start_year": ML_START_YEAR,
+        "rows_raw": len(raw_df),
+        "rows_features": len(feature_df),
+        "latest_completed_race_id": latest_id,
+        "metrics": metrics,
+        "feature_columns": feature_columns,
+        "backfill_used_this_run": BACKFILL_BUDGET.used,
+        "backfilled_races_this_run": BACKFILL_BUDGET.fetched,
+    }
+    MODEL_META_PATH.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    print(f"ML model saved: {MODEL_BUNDLE_PATH}")
+    return bundle
+
+
+def load_ml_bundle():
+    if not MODEL_BUNDLE_PATH.exists():
+        return None
+    try:
+        return joblib.load(MODEL_BUNDLE_PATH)
+    except Exception as error:
+        print(f"Could not load ML bundle: {error}")
+        return None
+
+
+def historical_feature_context(start_year, target_season):
+    df = collect_race_rows(start_year, target_season)
+    if df.empty:
+        return df
+    return df.sort_values(["season", "round"]).reset_index(drop=True)
+
+
+def build_prediction_feature_rows(drivers, race, current_round_data, historical_df, feature_columns):
+    season = safe_int(race.get("season")) or now_local().year
+    round_no = safe_int(race.get("round")) or 0
+    circuit_id = race.get("Circuit", {}).get("circuitId")
+
+    q_positions = {}
+    if current_round_data.get("qualifying"):
+        for q in current_round_data["qualifying"][0].get("QualifyingResults", []):
+            q_positions[q.get("Driver", {}).get("driverId")] = safe_int(q.get("position"))
+
+    sprint_positions = {}
+    if current_round_data.get("sprint"):
+        for s in current_round_data["sprint"][0].get("SprintResults", []) or current_round_data["sprint"][0].get("Results", []):
+            sprint_positions[s.get("Driver", {}).get("driverId")] = safe_int(s.get("positionOrder") or s.get("position"))
+
+    current_laps = driver_lap_metrics_from_data(current_round_data)
+    current_pits = pit_metrics_from_data(current_round_data)
+
+    rows = []
+    for driver in drivers:
+        driver_id = driver["driver_id"]
+        team = driver["team"]
+        hist = historical_df[(historical_df["season"] < season) | ((historical_df["season"] == season) & (historical_df["round"] < round_no))].copy() if not historical_df.empty else pd.DataFrame()
+
+        d_hist = hist[hist["driver_id"] == driver_id] if not hist.empty else pd.DataFrame()
+        t_hist = hist[hist["constructor"] == team] if not hist.empty else pd.DataFrame()
+        cd_hist = hist[(hist["circuit_id"] == circuit_id) & (hist["driver_id"] == driver_id)] if not hist.empty else pd.DataFrame()
+        ct_hist = hist[(hist["circuit_id"] == circuit_id) & (hist["constructor"] == team)] if not hist.empty else pd.DataFrame()
+        c_hist = hist[hist["circuit_id"] == circuit_id] if not hist.empty else pd.DataFrame()
+
+        def mean_or(frame, col, fallback):
+            if len(frame) and col in frame:
+                val = pd.to_numeric(frame[col], errors="coerce").mean()
+                if pd.notna(val):
+                    return float(val)
+            return fallback
+
+        standing_proxy = min(20, max(1, safe_int(driver.get("position")) or 12))
+        lap_now = current_laps.get(driver_id, {})
+        pit_now = current_pits.get(driver_id, {})
+
+        row = {
+            "driver_id": driver_id,
+            "driver_name": driver["name"],
+            "constructor": team,
+            "grid_position": q_positions.get(driver_id) or standing_proxy,
+            "qualifying_position": q_positions.get(driver_id) or standing_proxy,
+            "sprint_position": sprint_positions.get(driver_id) or 20,
+
+            "driver_avg_finish": mean_or(d_hist, "finish_position", 12),
+            "driver_median_finish": float(pd.to_numeric(d_hist["finish_position"], errors="coerce").median()) if len(d_hist) else 12,
+            "driver_avg_points": mean_or(d_hist, "points", 0),
+            "driver_win_rate": mean_or(d_hist, "is_win", 0),
+            "driver_podium_rate": mean_or(d_hist, "is_podium", 0),
+            "driver_top10_rate": mean_or(d_hist, "is_top10", 0),
+            "driver_finish_rate": mean_or(d_hist, "is_finished", 0.85),
+            "driver_recent3_finish": mean_or(d_hist.tail(3), "finish_position", mean_or(d_hist, "finish_position", 12)),
+            "driver_recent5_points": mean_or(d_hist.tail(5), "points", mean_or(d_hist, "points", 0)),
+            "driver_recent5_podium_rate": mean_or(d_hist.tail(5), "is_podium", mean_or(d_hist, "is_podium", 0)),
+
+            "team_avg_finish": mean_or(t_hist, "finish_position", 12),
+            "team_avg_points": mean_or(t_hist, "points", 0),
+            "team_win_rate": mean_or(t_hist, "is_win", 0),
+            "team_podium_rate": mean_or(t_hist, "is_podium", 0),
+            "team_top10_rate": mean_or(t_hist, "is_top10", 0),
+            "team_finish_rate": mean_or(t_hist, "is_finished", 0.85),
+            "team_recent_points": mean_or(t_hist.tail(10), "points", mean_or(t_hist, "points", 0)),
+
+            "driver_circuit_avg_finish": mean_or(cd_hist, "finish_position", mean_or(d_hist, "finish_position", 12)),
+            "driver_circuit_podium_rate": mean_or(cd_hist, "is_podium", mean_or(d_hist, "is_podium", 0)),
+            "team_circuit_avg_finish": mean_or(ct_hist, "finish_position", mean_or(t_hist, "finish_position", 12)),
+            "team_circuit_podium_rate": mean_or(ct_hist, "is_podium", mean_or(t_hist, "is_podium", 0)),
+            "career_starts": len(d_hist),
+            "team_starts": len(t_hist),
+            "circuit_experience": len(cd_hist),
+
+            "driver_lap_pace": lap_now.get("avg_best_35pct") or mean_or(d_hist.tail(5), "avg_best_35pct_lap", 100),
+            "driver_lap_consistency": lap_now.get("consistency") or mean_or(d_hist.tail(5), "lap_consistency", 3),
+            "driver_valid_laps": lap_now.get("valid_laps") or mean_or(d_hist.tail(5), "valid_laps", 0),
+            "driver_pit_duration": pit_now.get("avg_pit_duration") or mean_or(d_hist.tail(5), "avg_pit_duration", 3.5),
+            "driver_pit_stop_count": pit_now.get("pit_stop_count") or mean_or(d_hist.tail(5), "pit_stop_count", 1),
+            "team_pit_duration": mean_or(t_hist.tail(10), "avg_pit_duration", 3.5),
+            "team_pit_stop_count": mean_or(t_hist.tail(10), "pit_stop_count", 1),
+            "track_avg_pit_stops": mean_or(c_hist, "pit_stop_count", 1),
+            "track_avg_lap_consistency": mean_or(c_hist, "lap_consistency", 3),
+            "track_dnf_rate": 1 - mean_or(c_hist, "is_finished", 0.85),
+            "track_overtake_proxy": mean_or(c_hist, "grid", 10) - mean_or(c_hist, "finish_position", 10),
+        }
+        rows.append(row)
+
+    df = pd.DataFrame(rows)
+    for col in feature_columns:
+        if col not in df:
+            df[col] = 0
+    return df
+
+
+def ml_predict_probabilities(drivers, race, current_round_data, bundle):
+    if not bundle:
+        return {}, {"status": "no model bundle available"}
+    try:
+        feature_columns = bundle["feature_columns"]
+        historical_df = historical_feature_context(bundle.get("ml_start_year", ML_START_YEAR), safe_int(race.get("season")) or now_local().year)
+        pred_df = build_prediction_feature_rows(drivers, race, current_round_data, historical_df, feature_columns)
+        X = pred_df[feature_columns].replace([np.inf, -np.inf], np.nan).fillna(0)
+
+        outputs = {}
+        for target, pair in bundle["models"].items():
+            rf_prob = pair["rf"].predict_proba(X)[:, 1]
+            hgb_prob = pair["hgb"].predict_proba(X)[:, 1]
+            outputs[target] = 0.55 * rf_prob + 0.45 * hgb_prob
+
+        by_driver = {}
+        for idx, row in pred_df.iterrows():
+            driver_id = row["driver_id"]
+            by_driver[driver_id] = {
+                "ml_win_probability": float(outputs.get("win", [0])[idx] * 100),
+                "ml_podium_probability": float(outputs.get("podium", [0])[idx] * 100),
+                "ml_top10_probability": float(outputs.get("top10", [0])[idx] * 100),
+            }
+
+        return by_driver, {
+            "status": "ml predictions generated",
+            "feature_rows": pred_df.to_dict(orient="records"),
+            "bundle_meta": {k: v for k, v in bundle.items() if k != "models"},
+        }
+    except Exception as error:
+        print(f"ML prediction failed: {error}")
+        return {}, {"status": "ml prediction failed", "error": str(error)}
+
+
+def fetch_historical_same_circuit(target_race, years_back=5):
+    circuit_id = target_race.get("Circuit", {}).get("circuitId")
+    season = safe_int(target_race.get("season")) or now_local().year
+    records = []
+    if not circuit_id:
+        return records
+
+    for year in range(season, season - years_back - 1, -1):
+        for race in fetch_schedule(year):
+            if race.get("Circuit", {}).get("circuitId") == circuit_id:
+                round_no = race.get("round")
+                if round_no:
+                    data = fetch_round_data_cached(year, round_no, allow_backfill=True)
+                    records.append({"season": year, "round": round_no, "race": race, "data": data})
+                break
+    return records
+
 
 def fetch_weather_for_race(race, event_start):
     location = race.get("Circuit", {}).get("Location", {})
     lat = safe_float(location.get("lat"))
     lon = safe_float(location.get("long"))
-
     base = {
         "source": "Open-Meteo forecast",
         "temperature": "Unavailable",
         "rain": "Unavailable",
         "humidity": "Unavailable",
         "wind": "Unavailable",
+        "wind_gust": "Unavailable",
+        "cloud_cover": "Unavailable",
         "track_temperature": "Unavailable",
         "rain_score": 0,
         "heat_score": 0,
         "wind_score": 0,
         "impact": "Weather unavailable.",
     }
-
     if lat is None or lon is None:
         base["source"] = "Unavailable"
-        base["impact"] = "Circuit coordinates were missing."
+        base["impact"] = "Circuit coordinates missing."
         return base
 
     params = {
@@ -523,52 +1222,42 @@ def fetch_weather_for_race(race, event_start):
             parsed.append(datetime.fromisoformat(item).replace(tzinfo=USER_TIMEZONE))
         except ValueError:
             parsed.append(None)
-    valid = [(idx, value) for idx, value in enumerate(parsed) if value is not None]
+    valid = [(idx, val) for idx, val in enumerate(parsed) if val is not None]
     if not valid:
-        base["impact"] = "Forecast timestamps could not be parsed."
         return base
 
-    index = min(valid, key=lambda pair: abs(pair[1] - target))[0]
+    idx = min(valid, key=lambda pair: abs(pair[1] - target))[0]
 
-    def get_hourly(key):
-        values = hourly.get(key, [])
-        return values[index] if index < len(values) else None
+    def get(key):
+        vals = hourly.get(key, [])
+        return vals[idx] if idx < len(vals) else None
 
-    temp = get_hourly("temperature_2m")
-    rain = get_hourly("precipitation_probability")
-    humidity = get_hourly("relative_humidity_2m")
-    wind = get_hourly("wind_speed_10m")
-    gust = get_hourly("wind_gusts_10m")
-    cloud = get_hourly("cloud_cover")
+    temp = get("temperature_2m")
+    rain = get("precipitation_probability")
+    humidity = get("relative_humidity_2m")
+    wind = get("wind_speed_10m")
+    gust = get("wind_gusts_10m")
+    cloud = get("cloud_cover")
 
-    temp_number = safe_float(temp)
+    temp_num = safe_float(temp)
     rain_score = min(100, safe_float(rain) or 0)
-    wind_number = safe_float(gust) or safe_float(wind) or 0
+    wind_num = safe_float(gust) or safe_float(wind) or 0
+    heat_score = 85 if temp_num and temp_num >= 34 else 60 if temp_num and temp_num >= 29 else 55 if temp_num and temp_num <= 15 else 0
+    wind_score = min(100, wind_num * 2.6)
 
-    heat_score = 0
-    if temp_number is not None:
-        if temp_number >= 34:
-            heat_score = 85
-        elif temp_number >= 29:
-            heat_score = 60
-        elif temp_number <= 15:
-            heat_score = 55
-
-    wind_score = min(100, wind_number * 2.6)
-
-    impact = []
+    impacts = []
     if rain_score >= 50:
-        impact.append("high rain risk, mixed strategy possible")
+        impacts.append("high rain risk, mixed strategy possible")
     elif rain_score >= 25:
-        impact.append("moderate rain risk, radar should influence pit timing")
+        impacts.append("moderate rain risk, radar should influence pit timing")
     else:
-        impact.append("dry baseline more likely")
+        impacts.append("dry baseline more likely")
     if heat_score >= 60:
-        impact.append("heat may increase degradation and cooling demand")
+        impacts.append("heat may increase degradation and cooling demand")
     if wind_score >= 60:
-        impact.append("wind may affect braking stability and aero balance")
+        impacts.append("wind may affect braking stability and aero balance")
     if safe_float(cloud) and safe_float(cloud) >= 70:
-        impact.append("cloud cover may reduce track-temperature growth")
+        impacts.append("cloud cover may reduce track-temperature growth")
 
     return {
         "source": "Open-Meteo forecast",
@@ -582,27 +1271,28 @@ def fetch_weather_for_race(race, event_start):
         "rain_score": rain_score,
         "heat_score": heat_score,
         "wind_score": wind_score,
-        "impact": "; ".join(impact),
+        "impact": "; ".join(impacts),
     }
 
 
-def fetch_historical_weather_summary(race, years_back=3):
+def fetch_historical_weather_summary(race, years_back=5):
     location = race.get("Circuit", {}).get("Location", {})
     lat = safe_float(location.get("lat"))
     lon = safe_float(location.get("long"))
     race_dt = parse_race_datetime(race)
     if lat is None or lon is None or not race_dt:
         return {}
-
-    summaries = []
+    samples = []
     for year in range(race_dt.year - years_back, race_dt.year):
-        start = race_dt.replace(year=year).date().isoformat()
-        end = (race_dt.replace(year=year) + timedelta(days=1)).date().isoformat()
+        try:
+            start_dt = race_dt.replace(year=year)
+        except ValueError:
+            continue
         params = {
             "latitude": lat,
             "longitude": lon,
-            "start_date": start,
-            "end_date": end,
+            "start_date": start_dt.date().isoformat(),
+            "end_date": (start_dt + timedelta(days=1)).date().isoformat(),
             "hourly": "temperature_2m,precipitation,wind_speed_10m,cloud_cover",
             "timezone": USER_TIMEZONE_NAME,
         }
@@ -614,590 +1304,58 @@ def fetch_historical_weather_summary(race, years_back=3):
         except json.JSONDecodeError:
             continue
         hourly = data.get("hourly", {})
-        summaries.append({
+        samples.append({
             "year": year,
             "avg_temp": average(hourly.get("temperature_2m", [])),
+            "rain_total": sum(safe_float(x) or 0 for x in hourly.get("precipitation", [])),
             "max_wind": max([safe_float(x) or 0 for x in hourly.get("wind_speed_10m", [])], default=None),
-            "rain_total": sum([safe_float(x) or 0 for x in hourly.get("precipitation", [])]),
             "avg_cloud": average(hourly.get("cloud_cover", [])),
         })
-    return {"source": "Open-Meteo archive", "samples": summaries}
-
-
-# -----------------------------
-# Historical data for ML and scoring
-# -----------------------------
-
-def driver_name(driver):
-    return normalize_name(f"{driver.get('givenName', '')} {driver.get('familyName', '')}")
-
-
-def standings_to_drivers(driver_standings):
-    drivers = []
-    for row in driver_standings:
-        driver = row.get("Driver", {})
-        constructors = row.get("Constructors", [])
-        team = constructors[0].get("name") if constructors else "Unknown Team"
-        drivers.append({
-            "driver_id": driver.get("driverId"),
-            "name": driver_name(driver),
-            "team": team,
-            "points": safe_float(row.get("points")) or 0,
-            "position": safe_int(row.get("position")),
-            "wins": safe_int(row.get("wins")) or 0,
-            "image": None,
-            "team_colour": None,
-        })
-    return drivers
-
-
-def collect_race_rows(start_year, end_year):
-    rows = []
-    for year in range(start_year, end_year + 1):
-        print(f"Collecting historical Jolpica rows for {year}")
-        for race in fetch_schedule(year):
-            round_no = race.get("round")
-            if not round_no:
-                continue
-            data = fetch_round_data(year, round_no)
-            result_races = data.get("results", [])
-            if not result_races:
-                continue
-
-            q_positions = {}
-            qualifying = data.get("qualifying", [])
-            if qualifying:
-                for q in qualifying[0].get("QualifyingResults", []):
-                    driver_id = q.get("Driver", {}).get("driverId")
-                    q_positions[driver_id] = safe_int(q.get("position"))
-
-            race_id = f"{year}-{round_no}"
-            circuit = race.get("Circuit", {})
-            circuit_id = circuit.get("circuitId")
-            race_dt = parse_race_datetime(race)
-            for result in result_races[0].get("Results", []):
-                driver = result.get("Driver", {})
-                constructor = result.get("Constructor", {})
-                driver_id = driver.get("driverId")
-                constructor_name = constructor.get("name")
-                pos = safe_int(result.get("positionOrder") or result.get("position"))
-                grid = safe_int(result.get("grid"))
-                points = safe_float(result.get("points")) or 0
-                status = str(result.get("status", ""))
-                if not driver_id or not constructor_name or not pos:
-                    continue
-                rows.append({
-                    "race_id": race_id,
-                    "season": year,
-                    "round": safe_int(round_no),
-                    "date": race_dt.isoformat() if race_dt else None,
-                    "race_name": race.get("raceName"),
-                    "circuit_id": circuit_id,
-                    "circuit_name": circuit.get("circuitName"),
-                    "driver_id": driver_id,
-                    "driver_name": driver_name(driver),
-                    "constructor": constructor_name,
-                    "grid": grid if grid and grid > 0 else q_positions.get(driver_id),
-                    "qualifying": q_positions.get(driver_id),
-                    "finish_position": pos,
-                    "points": points,
-                    "status": status,
-                    "is_finished": 1 if ("Finished" in status or "+" in status) else 0,
-                    "is_win": 1 if pos == 1 else 0,
-                    "is_podium": 1 if pos <= 3 else 0,
-                    "is_top10": 1 if pos <= 10 else 0,
-                })
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.sort_values(["season", "round", "finish_position"]).reset_index(drop=True)
-    return df
-
-
-def create_ml_features(df):
-    if df.empty:
-        return df, []
-
-    df = df.copy()
-    df["grid"] = pd.to_numeric(df["grid"], errors="coerce").fillna(20)
-    df["qualifying"] = pd.to_numeric(df["qualifying"], errors="coerce").fillna(df["grid"])
-    df["finish_position"] = pd.to_numeric(df["finish_position"], errors="coerce")
-    df["points"] = pd.to_numeric(df["points"], errors="coerce").fillna(0)
-
-    feature_rows = []
-    grouped_driver = {k: g.sort_values(["season", "round"]) for k, g in df.groupby("driver_id")}
-    grouped_team = {k: g.sort_values(["season", "round"]) for k, g in df.groupby("constructor")}
-    grouped_circuit_driver = {k: g.sort_values(["season", "round"]) for k, g in df.groupby(["circuit_id", "driver_id"])}
-    grouped_circuit_team = {k: g.sort_values(["season", "round"]) for k, g in df.groupby(["circuit_id", "constructor"])}
-
-    for idx, race in df.iterrows():
-        season = race["season"]
-        round_no = race["round"]
-
-        def before(frame):
-            return frame[(frame["season"] < season) | ((frame["season"] == season) & (frame["round"] < round_no))]
-
-        d_hist = before(grouped_driver.get(race["driver_id"], pd.DataFrame()))
-        t_hist = before(grouped_team.get(race["constructor"], pd.DataFrame()))
-        cd_hist = before(grouped_circuit_driver.get((race["circuit_id"], race["driver_id"]), pd.DataFrame()))
-        ct_hist = before(grouped_circuit_team.get((race["circuit_id"], race["constructor"]), pd.DataFrame()))
-
-        if len(d_hist) < 3 or len(t_hist) < 3:
-            continue
-
-        recent3 = d_hist.tail(3)
-        recent5 = d_hist.tail(5)
-        team_recent5 = t_hist.tail(10)
-
-        features = {
-            "race_id": race["race_id"],
-            "season": season,
-            "round": round_no,
-            "race_name": race["race_name"],
-            "circuit_id": race["circuit_id"],
-            "driver_id": race["driver_id"],
-            "driver_name": race["driver_name"],
-            "constructor": race["constructor"],
-            "finish_position": race["finish_position"],
-            "is_win": race["is_win"],
-            "is_podium": race["is_podium"],
-            "is_top10": race["is_top10"],
-
-            "grid_position": race["grid"],
-            "qualifying_position": race["qualifying"],
-            "driver_avg_finish": d_hist["finish_position"].mean(),
-            "driver_median_finish": d_hist["finish_position"].median(),
-            "driver_avg_points": d_hist["points"].mean(),
-            "driver_win_rate": d_hist["is_win"].mean(),
-            "driver_podium_rate": d_hist["is_podium"].mean(),
-            "driver_top10_rate": d_hist["is_top10"].mean(),
-            "driver_finish_rate": d_hist["is_finished"].mean(),
-            "driver_recent3_finish": recent3["finish_position"].mean(),
-            "driver_recent5_points": recent5["points"].mean(),
-            "driver_recent5_podium_rate": recent5["is_podium"].mean(),
-
-            "team_avg_finish": t_hist["finish_position"].mean(),
-            "team_avg_points": t_hist["points"].mean(),
-            "team_win_rate": t_hist["is_win"].mean(),
-            "team_podium_rate": t_hist["is_podium"].mean(),
-            "team_top10_rate": t_hist["is_top10"].mean(),
-            "team_finish_rate": t_hist["is_finished"].mean(),
-            "team_recent_points": team_recent5["points"].mean(),
-
-            "driver_circuit_avg_finish": cd_hist["finish_position"].mean() if len(cd_hist) else d_hist["finish_position"].mean(),
-            "driver_circuit_podium_rate": cd_hist["is_podium"].mean() if len(cd_hist) else d_hist["is_podium"].mean(),
-            "team_circuit_avg_finish": ct_hist["finish_position"].mean() if len(ct_hist) else t_hist["finish_position"].mean(),
-            "team_circuit_podium_rate": ct_hist["is_podium"].mean() if len(ct_hist) else t_hist["is_podium"].mean(),
-
-            "career_starts": len(d_hist),
-            "team_starts": len(t_hist),
-            "circuit_experience": len(cd_hist),
-        }
-        feature_rows.append(features)
-
-    feature_df = pd.DataFrame(feature_rows)
-    feature_columns = [
-        "grid_position",
-        "qualifying_position",
-        "driver_avg_finish",
-        "driver_median_finish",
-        "driver_avg_points",
-        "driver_win_rate",
-        "driver_podium_rate",
-        "driver_top10_rate",
-        "driver_finish_rate",
-        "driver_recent3_finish",
-        "driver_recent5_points",
-        "driver_recent5_podium_rate",
-        "team_avg_finish",
-        "team_avg_points",
-        "team_win_rate",
-        "team_podium_rate",
-        "team_top10_rate",
-        "team_finish_rate",
-        "team_recent_points",
-        "driver_circuit_avg_finish",
-        "driver_circuit_podium_rate",
-        "team_circuit_avg_finish",
-        "team_circuit_podium_rate",
-        "career_starts",
-        "team_starts",
-        "circuit_experience",
-    ]
-    return feature_df, feature_columns
-
-
-def latest_completed_race_id(current_year=None):
-    year = current_year or now_local().year
-    races = fetch_schedule(year)
-    completed = []
-    for race in races:
-        race_dt = parse_race_datetime(race)
-        if race_dt and race_dt < now_local() - timedelta(hours=2):
-            data = fetch_round_data(year, race.get("round"))
-            if data.get("results"):
-                completed.append((race_dt, f"{year}-{race.get('round')}", race))
-    if not completed and year > 1950:
-        return latest_completed_race_id(year - 1)
-    completed.sort(key=lambda item: item[0])
-    return completed[-1][1] if completed else None
-
-
-def should_retrain(force=False):
-    if force:
-        return True
-    if not MODEL_BUNDLE_PATH.exists() or not MODEL_META_PATH.exists():
-        return True
-    try:
-        meta = json.loads(MODEL_META_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return True
-    latest = latest_completed_race_id()
-    return bool(latest and meta.get("latest_completed_race_id") != latest)
-
-
-def train_ml_model(force=False):
-    if not should_retrain(force):
-        print("ML model is current. Skipping retrain.")
-        return load_ml_bundle()
-
-    print("Training ML model from free Jolpica historical data...")
-    current_year = now_local().year
-    raw_df = collect_race_rows(ML_START_YEAR, current_year)
-    if raw_df.empty:
-        raise RuntimeError("No historical rows collected for ML training.")
-
-    raw_path = DATA_CACHE_DIR / "ml_race_results_raw.csv"
-    features_path = DATA_CACHE_DIR / "ml_race_features.csv"
-    raw_df.to_csv(raw_path, index=False)
-
-    feature_df, feature_columns = create_ml_features(raw_df)
-    if len(feature_df) < 100:
-        raise RuntimeError(f"Not enough ML feature rows: {len(feature_df)}")
-
-    feature_df.to_csv(features_path, index=False)
-
-    train_years = sorted(feature_df["season"].unique())
-    validation_year = train_years[-1]
-    train_df = feature_df[feature_df["season"] < validation_year].copy()
-    valid_df = feature_df[feature_df["season"] == validation_year].copy()
-    if len(train_df) < 50 or len(valid_df) < 20:
-        train_df = feature_df.sample(frac=0.8, random_state=42)
-        valid_df = feature_df.drop(train_df.index)
-
-    X_train = train_df[feature_columns].replace([np.inf, -np.inf], np.nan).fillna(0)
-    X_valid = valid_df[feature_columns].replace([np.inf, -np.inf], np.nan).fillna(0)
-
-    targets = {
-        "win": "is_win",
-        "podium": "is_podium",
-        "top10": "is_top10",
-    }
-
-    models = {}
-    metrics = {}
-
-    for name, target_col in targets.items():
-        y_train = train_df[target_col].astype(int)
-        y_valid = valid_df[target_col].astype(int)
-
-        rf = RandomForestClassifier(
-            n_estimators=260,
-            max_depth=10,
-            min_samples_leaf=3,
-            random_state=42,
-            n_jobs=-1,
-            class_weight="balanced_subsample",
-        )
-        hgb = HistGradientBoostingClassifier(
-            max_iter=160,
-            learning_rate=0.06,
-            max_leaf_nodes=31,
-            l2_regularization=0.02,
-            random_state=42,
-        )
-
-        rf.fit(X_train, y_train)
-        hgb.fit(X_train, y_train)
-
-        valid_rf = rf.predict_proba(X_valid)[:, 1]
-        valid_hgb = hgb.predict_proba(X_valid)[:, 1]
-        valid_prob = (valid_rf * 0.55) + (valid_hgb * 0.45)
-
-        try:
-            auc = roc_auc_score(y_valid, valid_prob)
-        except Exception:
-            auc = None
-        try:
-            brier = brier_score_loss(y_valid, valid_prob)
-        except Exception:
-            brier = None
-
-        models[name] = {"rf": rf, "hgb": hgb}
-        metrics[name] = {"auc": auc, "brier": brier, "validation_rows": len(valid_df)}
-
-    latest_id = latest_completed_race_id()
-    bundle = {
-        "models": models,
-        "feature_columns": feature_columns,
-        "trained_at": now_local().isoformat(),
-        "ml_start_year": ML_START_YEAR,
-        "latest_completed_race_id": latest_id,
-        "metrics": metrics,
-    }
-
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump(bundle, MODEL_BUNDLE_PATH)
-
-    meta = {
-        "trained_at": bundle["trained_at"],
-        "ml_start_year": ML_START_YEAR,
-        "rows_raw": len(raw_df),
-        "rows_features": len(feature_df),
-        "latest_completed_race_id": latest_id,
-        "metrics": metrics,
-        "feature_columns": feature_columns,
-    }
-    MODEL_META_PATH.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    print(f"ML model saved to {MODEL_BUNDLE_PATH}")
-    return bundle
-
-
-def load_ml_bundle():
-    if not MODEL_BUNDLE_PATH.exists():
-        return None
-    try:
-        return joblib.load(MODEL_BUNDLE_PATH)
-    except Exception as error:
-        print(f"Could not load ML model bundle: {error}")
-        return None
-
-
-def historical_feature_context(start_year, target_season):
-    df = collect_race_rows(start_year, target_season)
-    return df.sort_values(["season", "round"]) if not df.empty else df
-
-
-def build_prediction_feature_rows(drivers, race, current_round_data, historical_df, feature_columns):
-    season = safe_int(race.get("season")) or now_local().year
-    round_no = safe_int(race.get("round")) or 0
-    circuit_id = race.get("Circuit", {}).get("circuitId")
-    race_id = f"{season}-{round_no}"
-
-    q_positions = {}
-    qualifying = current_round_data.get("qualifying", [])
-    if qualifying:
-        for q in qualifying[0].get("QualifyingResults", []):
-            driver_id = q.get("Driver", {}).get("driverId")
-            q_positions[driver_id] = safe_int(q.get("position"))
-
-    rows = []
-    for driver in drivers:
-        driver_id = driver["driver_id"]
-        team = driver["team"]
-        hist = historical_df.copy()
-        hist = hist[(hist["season"] < season) | ((hist["season"] == season) & (hist["round"] < round_no))]
-
-        d_hist = hist[hist["driver_id"] == driver_id]
-        t_hist = hist[hist["constructor"] == team]
-        cd_hist = hist[(hist["circuit_id"] == circuit_id) & (hist["driver_id"] == driver_id)]
-        ct_hist = hist[(hist["circuit_id"] == circuit_id) & (hist["constructor"] == team)]
-
-        recent3 = d_hist.tail(3)
-        recent5 = d_hist.tail(5)
-        team_recent5 = t_hist.tail(10)
-
-        standing_grid_proxy = min(20, max(1, safe_int(driver.get("position")) or 12))
-        grid = q_positions.get(driver_id) or standing_grid_proxy
-
-        row = {
-            "race_id": race_id,
-            "season": season,
-            "round": round_no,
-            "race_name": race.get("raceName"),
-            "circuit_id": circuit_id,
-            "driver_id": driver_id,
-            "driver_name": driver["name"],
-            "constructor": team,
-
-            "grid_position": grid,
-            "qualifying_position": q_positions.get(driver_id) or grid,
-            "driver_avg_finish": d_hist["finish_position"].mean() if len(d_hist) else 12,
-            "driver_median_finish": d_hist["finish_position"].median() if len(d_hist) else 12,
-            "driver_avg_points": d_hist["points"].mean() if len(d_hist) else 0,
-            "driver_win_rate": d_hist["is_win"].mean() if len(d_hist) else 0,
-            "driver_podium_rate": d_hist["is_podium"].mean() if len(d_hist) else 0,
-            "driver_top10_rate": d_hist["is_top10"].mean() if len(d_hist) else 0,
-            "driver_finish_rate": d_hist["is_finished"].mean() if len(d_hist) else 0.8,
-            "driver_recent3_finish": recent3["finish_position"].mean() if len(recent3) else (d_hist["finish_position"].mean() if len(d_hist) else 12),
-            "driver_recent5_points": recent5["points"].mean() if len(recent5) else (d_hist["points"].mean() if len(d_hist) else 0),
-            "driver_recent5_podium_rate": recent5["is_podium"].mean() if len(recent5) else (d_hist["is_podium"].mean() if len(d_hist) else 0),
-
-            "team_avg_finish": t_hist["finish_position"].mean() if len(t_hist) else 12,
-            "team_avg_points": t_hist["points"].mean() if len(t_hist) else 0,
-            "team_win_rate": t_hist["is_win"].mean() if len(t_hist) else 0,
-            "team_podium_rate": t_hist["is_podium"].mean() if len(t_hist) else 0,
-            "team_top10_rate": t_hist["is_top10"].mean() if len(t_hist) else 0,
-            "team_finish_rate": t_hist["is_finished"].mean() if len(t_hist) else 0.8,
-            "team_recent_points": team_recent5["points"].mean() if len(team_recent5) else (t_hist["points"].mean() if len(t_hist) else 0),
-
-            "driver_circuit_avg_finish": cd_hist["finish_position"].mean() if len(cd_hist) else (d_hist["finish_position"].mean() if len(d_hist) else 12),
-            "driver_circuit_podium_rate": cd_hist["is_podium"].mean() if len(cd_hist) else (d_hist["is_podium"].mean() if len(d_hist) else 0),
-            "team_circuit_avg_finish": ct_hist["finish_position"].mean() if len(ct_hist) else (t_hist["finish_position"].mean() if len(t_hist) else 12),
-            "team_circuit_podium_rate": ct_hist["is_podium"].mean() if len(ct_hist) else (t_hist["is_podium"].mean() if len(t_hist) else 0),
-            "career_starts": len(d_hist),
-            "team_starts": len(t_hist),
-            "circuit_experience": len(cd_hist),
-        }
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-    for col in feature_columns:
-        if col not in df:
-            df[col] = 0
-    return df
-
-
-def ml_predict_probabilities(drivers, race, current_round_data, bundle):
-    if not bundle:
-        return {}, {}
-    try:
-        feature_columns = bundle["feature_columns"]
-        historical_df = historical_feature_context(bundle.get("ml_start_year", ML_START_YEAR), safe_int(race.get("season")) or now_local().year)
-        pred_df = build_prediction_feature_rows(drivers, race, current_round_data, historical_df, feature_columns)
-        X = pred_df[feature_columns].replace([np.inf, -np.inf], np.nan).fillna(0)
-
-        outputs = {}
-        for target_name, pair in bundle["models"].items():
-            rf_prob = pair["rf"].predict_proba(X)[:, 1]
-            hgb_prob = pair["hgb"].predict_proba(X)[:, 1]
-            prob = (rf_prob * 0.55) + (hgb_prob * 0.45)
-            outputs[target_name] = prob
-
-        by_driver = {}
-        for idx, row in pred_df.iterrows():
-            driver_id = row["driver_id"]
-            by_driver[driver_id] = {
-                "ml_win_probability": float(outputs.get("win", [0])[idx] * 100),
-                "ml_podium_probability": float(outputs.get("podium", [0])[idx] * 100),
-                "ml_top10_probability": float(outputs.get("top10", [0])[idx] * 100),
-            }
-        return by_driver, {"feature_rows": pred_df.to_dict(orient="records"), "bundle_meta": {k: v for k, v in bundle.items() if k not in {"models"}}}
-    except Exception as error:
-        print(f"ML prediction failed: {error}")
-        return {}, {"error": str(error)}
-
-
-# -----------------------------
-# Track, strategy, FastF1 metrics
-# -----------------------------
-
-def fetch_historical_same_circuit(target_race, years_back=4):
-    target_circuit_id = target_race.get("Circuit", {}).get("circuitId")
-    target_season = safe_int(target_race.get("season")) or now_local().year
-    records = []
-    if not target_circuit_id:
-        return records
-
-    for year in range(target_season, target_season - years_back - 1, -1):
-        for race in fetch_schedule(year):
-            if race.get("Circuit", {}).get("circuitId") == target_circuit_id:
-                round_no = race.get("round")
-                if round_no:
-                    records.append({"season": year, "round": round_no, "race": race, "data": fetch_round_data(year, round_no)})
-                break
-    return records
-
-
-def extract_results(historical_records):
-    rows = []
-    for record in historical_records:
-        races = record.get("data", {}).get("results", [])
-        if not races:
-            continue
-        for row in races[0].get("Results", []):
-            rows.append({**row, "season": record["season"]})
-    return rows
-
-
-def extract_qualifying(historical_records):
-    rows = []
-    for record in historical_records:
-        races = record.get("data", {}).get("qualifying", [])
-        if not races:
-            continue
-        for row in races[0].get("QualifyingResults", []):
-            rows.append({**row, "season": record["season"]})
-    return rows
-
-
-def extract_pitstops(historical_records):
-    rows = []
-    for record in historical_records:
-        races = record.get("data", {}).get("pitstops", [])
-        if not races:
-            continue
-        for row in races[0].get("PitStops", []):
-            rows.append({**row, "season": record["season"]})
-    return rows
+    return {"source": "Open-Meteo archive", "samples": samples}
 
 
 def infer_track_profile(race, historical_records, weather_summary, historical_weather=None):
-    results = extract_results(historical_records)
-    qualifying = extract_qualifying(historical_records)
-    pitstops = extract_pitstops(historical_records)
+    trait_samples = []
+    all_results = []
+    for record in historical_records:
+        data = record.get("data", {})
+        trait = track_traits_from_race_data(data)
+        if trait:
+            trait_samples.append(trait)
+        result_races = data.get("results", [])
+        if result_races:
+            all_results.extend(result_races[0].get("Results", []))
 
-    overtaking_deltas = []
-    dnf_count = 0
-    finished_count = 0
+    avg_overtake = average([x.get("avg_grid_finish_movement") for x in trait_samples])
+    avg_stops = average([x.get("avg_pit_stops") for x in trait_samples])
+    dnf_rate = average([x.get("dnf_rate") for x in trait_samples])
+    lap_consistency = average([x.get("avg_lap_consistency") for x in trait_samples])
 
-    for result in results:
-        grid = safe_int(result.get("grid"))
-        finish = safe_int(result.get("positionOrder") or result.get("position"))
-        status = str(result.get("status", "")).lower()
-        if grid and grid > 0 and finish:
-            overtaking_deltas.append(abs(grid - finish))
-        if "finished" in status or "+" in status:
-            finished_count += 1
-        else:
-            dnf_count += 1
-
-    avg_overtake = average(overtaking_deltas)
     if avg_overtake is None:
         overtaking = "unknown"
-        overtaking_reason = "not enough grid-to-result history"
     elif avg_overtake >= 5:
         overtaking = "good"
-        overtaking_reason = f"average grid-to-finish movement around {avg_overtake:.1f} places"
     elif avg_overtake >= 3:
         overtaking = "medium-good"
-        overtaking_reason = f"average grid-to-finish movement around {avg_overtake:.1f} places"
     elif avg_overtake >= 1.5:
         overtaking = "medium"
-        overtaking_reason = f"average grid-to-finish movement around {avg_overtake:.1f} places"
     else:
         overtaking = "low-medium"
-        overtaking_reason = f"average grid-to-finish movement around {avg_overtake:.1f} places"
 
-    drivers_seen = len(set(row.get("driverId") for row in pitstops if row.get("driverId")))
-    avg_stops = len(pitstops) / drivers_seen if drivers_seen else None
     if avg_stops is None:
         tyre_stress = "unknown"
-        tyre_reason = "not enough pit-stop history"
-    elif avg_stops >= 2.0:
+    elif avg_stops >= 2:
         tyre_stress = "high"
-        tyre_reason = f"historical average around {avg_stops:.1f} stops per driver"
     elif avg_stops >= 1.45:
         tyre_stress = "medium-high"
-        tyre_reason = f"historical average around {avg_stops:.1f} stops per driver"
-    elif avg_stops >= 1.0:
+    elif avg_stops >= 1:
         tyre_stress = "medium"
-        tyre_reason = f"historical average around {avg_stops:.1f} stops per driver"
     else:
         tyre_stress = "low-medium"
-        tyre_reason = f"historical average around {avg_stops:.1f} stops per driver"
 
-    dnf_rate = dnf_count / max(1, dnf_count + finished_count)
-    if dnf_rate >= 0.25:
+    if dnf_rate is None:
+        safety_car = "unknown"
+    elif dnf_rate >= 0.25:
         safety_car = "high"
     elif dnf_rate >= 0.15:
         safety_car = "medium-high"
@@ -1207,35 +1365,36 @@ def infer_track_profile(race, historical_records, weather_summary, historical_we
         safety_car = "low-medium"
 
     circuit = race.get("Circuit", {})
+    location = circuit.get("Location", {})
     circuit_name = circuit.get("circuitName", "Unknown circuit")
     circuit_id = circuit.get("circuitId", "")
-    location = circuit.get("Location", {})
     text = f"{race.get('raceName', '')} {circuit_name} {circuit_id}".lower()
 
-    if any(k in text for k in ["monaco", "singapore", "marina", "baku", "miami", "jeddah", "vegas"]):
+    street = any(k in text for k in ["monaco", "singapore", "marina", "baku", "miami", "jeddah", "vegas"])
+    if street:
         track_type = "street or temporary circuit"
     else:
         track_type = "permanent circuit"
 
     if any(k in text for k in ["monza", "vegas", "baku", "jeddah"]):
         speed_profile = "straight-line-speed dominant"
-        speed_reason = "circuit identity points to long straights and low-drag demand"
+        car_trait = "low drag efficiency, braking stability, power delivery"
     elif any(k in text for k in ["silverstone", "suzuka", "spa", "qatar", "lusail"]):
         speed_profile = "aero-efficiency dominant"
-        speed_reason = "circuit identity points to high-speed cornering load"
+        car_trait = "high-speed downforce, aero efficiency, tyre load control"
     elif any(k in text for k in ["monaco", "hungaroring", "singapore"]):
         speed_profile = "traction and braking dominant"
-        speed_reason = "circuit identity points to slow corners and track position"
+        car_trait = "high downforce, slow-corner traction, kerb compliance"
     else:
         speed_profile = "balanced speed profile"
-        speed_reason = "no extreme speed profile detected from free race data"
+        car_trait = "balanced aero, traction, braking, and tyre management"
 
-    if speed_profile == "straight-line-speed dominant":
+    if "straight-line" in speed_profile:
         dominance = "low drag and straight-line speed"
-    elif speed_profile == "aero-efficiency dominant":
-        dominance = "aero efficiency and tyre-load management"
-    elif "street" in track_type and overtaking in {"low", "low-medium", "unknown"}:
-        dominance = "track position, braking stability, and wall confidence"
+    elif "aero" in speed_profile:
+        dominance = "aero efficiency and high-speed downforce"
+    elif street and overtaking in {"low", "low-medium", "unknown"}:
+        dominance = "track position, downforce, braking stability, and wall confidence"
     elif tyre_stress in {"high", "medium-high"}:
         dominance = "tyre management and thermal control"
     else:
@@ -1248,24 +1407,14 @@ def infer_track_profile(race, historical_records, weather_summary, historical_we
     else:
         strategy_bias = "one-stop or two-stop depending on safety car and tyre delta"
 
-    setup = []
-    if "straight-line" in dominance:
-        setup.append("lower drag wing level with strong braking stability")
-    elif "track position" in dominance:
-        setup.append("higher downforce, braking confidence, and kerb compliance")
-    elif "tyre" in dominance:
-        setup.append("stable platform with tyre temperature control")
-    else:
-        setup.append("balanced aero platform")
-
+    setup = [car_trait]
     if weather_summary.get("rain_score", 0) >= 35:
-        setup.append("keep wet crossover flexibility")
+        setup.append("wet crossover flexibility")
     if weather_summary.get("wind_score", 0) >= 60:
-        setup.append("avoid unstable aero balance in wind")
+        setup.append("stable aero balance in wind")
 
     return {
         "race_name": race.get("raceName", "Unknown Grand Prix"),
-        "official_name": race.get("raceName"),
         "circuit": circuit_name,
         "city": location.get("locality", "Unknown location"),
         "country": location.get("country", "Unknown country"),
@@ -1274,30 +1423,31 @@ def infer_track_profile(race, historical_records, weather_summary, historical_we
         "meeting_key": f"{race.get('season')}-{race.get('round')}",
         "dominance": dominance,
         "speed_profile": speed_profile,
+        "car_trait": car_trait,
         "overtaking": overtaking,
         "tyre_stress": tyre_stress,
         "safety_car": safety_car,
         "strategy_bias": strategy_bias,
         "setup": "; ".join(setup),
         "dynamic_reasons": {
-            "tyre_stress": tyre_reason,
-            "overtaking": overtaking_reason,
-            "safety_car": f"non-finish proxy rate around {dnf_rate * 100:.1f}%",
-            "speed_profile": speed_reason,
+            "overtaking": f"average grid-to-finish movement around {avg_overtake}" if avg_overtake is not None else "not enough cached historical data yet",
+            "tyre_stress": f"historical average around {avg_stops} stops per driver" if avg_stops is not None else "not enough cached pit data yet",
+            "safety_car": f"non-finish proxy rate around {dnf_rate * 100:.1f}%" if dnf_rate is not None else "not enough cached result data yet",
+            "speed_profile": f"car trait inferred as {car_trait}",
         },
         "dynamic_track_source": {
-            "used_jolpica_schedule": True,
-            "used_jolpica_history": bool(historical_records),
+            "source": "Jolpica full cached history + Open-Meteo + optional FastF1",
+            "used_full_race_cache": True,
             "used_open_meteo_archive": bool(historical_weather and historical_weather.get("samples")),
-            "source": "Jolpica + Open-Meteo + optional FastF1",
         },
         "dynamic_track_metrics": {
             "historical_races_sampled": len(historical_records),
-            "results_sampled": len(results),
-            "qualifying_rows_sampled": len(qualifying),
-            "pitstops_sampled": len(pitstops),
             "average_overtake_delta": avg_overtake,
             "average_stops_per_driver": avg_stops,
+            "dnf_rate": dnf_rate,
+            "lap_consistency": lap_consistency,
+            "backfill_used_this_run": BACKFILL_BUDGET.used,
+            "backfilled_races_this_run": BACKFILL_BUDGET.fetched,
         },
         "historical_weather": historical_weather or {},
     }
@@ -1306,8 +1456,7 @@ def infer_track_profile(race, historical_records, weather_summary, historical_we
 def constructor_score_map(constructor_standings):
     raw = {}
     for row in constructor_standings:
-        constructor = row.get("Constructor", {})
-        name = constructor.get("name")
+        name = row.get("Constructor", {}).get("name")
         points = safe_float(row.get("points"))
         position = safe_int(row.get("position"))
         if name:
@@ -1338,168 +1487,133 @@ def qualifying_score_map(round_data):
     return raw
 
 
+def sprint_score_map(round_data):
+    raw = {}
+    races = round_data.get("sprint", [])
+    if not races:
+        return raw
+    for row in races[0].get("SprintResults", []) or races[0].get("Results", []):
+        driver_id = row.get("Driver", {}).get("driverId")
+        pos = safe_int(row.get("positionOrder") or row.get("position"))
+        if driver_id and pos:
+            raw[driver_id] = score_position(pos)
+    return raw
+
+
 def circuit_history_score_map(historical_records):
-    raw_result = {}
-    raw_qual = {}
+    raw = {}
     for record in historical_records:
-        year_weight = max(0.35, 1 - (now_local().year - record["season"]) * 0.18)
-        data = record.get("data", {})
-        races = data.get("results", [])
-        if races:
-            for row in races[0].get("Results", []):
-                driver_id = row.get("Driver", {}).get("driverId")
-                pos = safe_int(row.get("positionOrder") or row.get("position"))
-                if driver_id and pos:
-                    raw_result.setdefault(driver_id, []).append((score_position(pos), year_weight))
-        qs = data.get("qualifying", [])
-        if qs:
-            for row in qs[0].get("QualifyingResults", []):
-                driver_id = row.get("Driver", {}).get("driverId")
-                pos = safe_int(row.get("position"))
-                if driver_id and pos:
-                    raw_qual.setdefault(driver_id, []).append((score_position(pos), year_weight))
-    out = {}
-    for d in set(raw_result) | set(raw_qual):
-        out[d] = weighted_average([
-            (weighted_average(raw_result.get(d, [])), 0.65),
-            (weighted_average(raw_qual.get(d, [])), 0.35),
-        ])
-    return out
+        weight = max(0.35, 1 - (now_local().year - record["season"]) * 0.12)
+        result_races = record.get("data", {}).get("results", [])
+        if not result_races:
+            continue
+        for row in result_races[0].get("Results", []):
+            driver_id = row.get("Driver", {}).get("driverId")
+            pos = safe_int(row.get("positionOrder") or row.get("position"))
+            if driver_id and pos:
+                raw.setdefault(driver_id, []).append((score_position(pos), weight))
+    return {driver_id: weighted_average(vals) for driver_id, vals in raw.items()}
 
 
-def constructor_lookup_from_results(result_race):
-    lookup = {}
-    if not result_race:
-        return lookup
-    for row in result_race.get("Results", []):
-        d = row.get("Driver", {}).get("driverId")
-        c = row.get("Constructor", {}).get("name")
-        if d and c:
-            lookup[d] = c
-    return lookup
+def constructor_circuit_score_map(historical_records):
+    raw = {}
+    for record in historical_records:
+        weight = max(0.35, 1 - (now_local().year - record["season"]) * 0.12)
+        result_races = record.get("data", {}).get("results", [])
+        if not result_races:
+            continue
+        for row in result_races[0].get("Results", []):
+            team = row.get("Constructor", {}).get("name")
+            pos = safe_int(row.get("positionOrder") or row.get("position"))
+            if team and pos:
+                raw.setdefault(team, []).append((score_position(pos), weight))
+    return {team: weighted_average(vals) for team, vals in raw.items()}
 
 
 def race_pace_score_map(historical_records, current_round_data):
     raw = {}
+    records = [{"season": now_local().year, "data": current_round_data, "weight": 1.35}]
+    for rec in historical_records:
+        records.append({"season": rec["season"], "data": rec.get("data", {}), "weight": max(0.35, 1 - (now_local().year - rec["season"]) * 0.12)})
 
-    def collect(races, weight):
-        for race in races or []:
-            for lap in race.get("Laps", []):
-                for timing in lap.get("Timings", []):
-                    driver_id = timing.get("driverId")
-                    seconds = parse_lap_time_to_seconds(timing.get("time"))
-                    if not driver_id or seconds is None:
-                        continue
-                    if seconds < 45 or seconds > 180:
-                        continue
-                    raw.setdefault(driver_id, []).append((seconds, weight))
+    for rec in records:
+        metrics = driver_lap_metrics_from_data(rec["data"])
+        for driver_id, item in metrics.items():
+            if item.get("avg_best_35pct"):
+                raw.setdefault(driver_id, []).append((item["avg_best_35pct"], rec["weight"]))
 
-    for record in historical_records:
-        weight = max(0.35, 1 - (now_local().year - record["season"]) * 0.18)
-        collect(record.get("data", {}).get("laps", []), weight)
-    collect(current_round_data.get("laps", []), 1.25)
-
-    driver_pace = {}
-    for driver_id, values in raw.items():
-        seconds = [v for v, _ in values]
-        if len(seconds) < 5:
-            continue
-        fastest = min(seconds)
-        filtered = sorted([(v, w) for v, w in values if v <= fastest + 7.0], key=lambda item: item[0])
-        if len(filtered) < 5:
-            continue
-        sample_size = max(5, int(len(filtered) * 0.35))
-        driver_pace[driver_id] = weighted_average(filtered[:sample_size])
-    return normalize_scores(driver_pace, reverse=True)
+    avg_laps = {driver_id: weighted_average(vals) for driver_id, vals in raw.items()}
+    return normalize_scores(avg_laps, reverse=True)
 
 
 def pit_execution_score_maps(historical_records, current_round_data):
     driver_raw = {}
-    constructor_raw = {}
+    team_raw = {}
 
-    def collect(data, weight):
+    def constructor_lookup(data):
+        lookup = {}
         result_races = data.get("results", [])
-        pitstop_races = data.get("pitstops", [])
-        if not result_races or not pitstop_races:
-            return
-        lookup = constructor_lookup_from_results(result_races[0])
-        for race in pitstop_races:
-            for stop in race.get("PitStops", []):
-                driver_id = stop.get("driverId")
-                duration = safe_float(stop.get("duration"))
-                if not driver_id or duration is None:
-                    continue
-                if duration < 1.5 or duration > 65:
-                    continue
-                driver_raw.setdefault(driver_id, []).append((duration, weight))
-                constructor = lookup.get(driver_id)
-                if constructor:
-                    constructor_raw.setdefault(constructor, []).append((duration, weight))
+        if result_races:
+            for row in result_races[0].get("Results", []):
+                lookup[row.get("Driver", {}).get("driverId")] = row.get("Constructor", {}).get("name")
+        return lookup
 
-    for record in historical_records:
-        weight = max(0.35, 1 - (now_local().year - record["season"]) * 0.18)
-        collect(record.get("data", {}), weight)
-    collect(current_round_data, 1.25)
+    records = [{"season": now_local().year, "data": current_round_data, "weight": 1.35}]
+    for rec in historical_records:
+        records.append({"season": rec["season"], "data": rec.get("data", {}), "weight": max(0.35, 1 - (now_local().year - rec["season"]) * 0.12)})
 
-    driver_avg = {d: weighted_average(v) for d, v in driver_raw.items()}
-    team_avg = {c: weighted_average(v) for c, v in constructor_raw.items()}
-    return normalize_scores(driver_avg, reverse=True), normalize_scores(team_avg, reverse=True)
+    for rec in records:
+        metrics = pit_metrics_from_data(rec["data"])
+        lookup = constructor_lookup(rec["data"])
+        for driver_id, item in metrics.items():
+            duration = item.get("avg_pit_duration")
+            if duration:
+                driver_raw.setdefault(driver_id, []).append((duration, rec["weight"]))
+                team = lookup.get(driver_id)
+                if team:
+                    team_raw.setdefault(team, []).append((duration, rec["weight"]))
+
+    return normalize_scores({d: weighted_average(v) for d, v in driver_raw.items()}, reverse=True), normalize_scores({t: weighted_average(v) for t, v in team_raw.items()}, reverse=True)
 
 
 def strategy_gain_score_maps(historical_records):
     driver_raw = {}
     team_raw = {}
-    for record in historical_records:
-        races = record.get("data", {}).get("results", [])
+    for rec in historical_records:
+        weight = max(0.35, 1 - (now_local().year - rec["season"]) * 0.12)
+        races = rec.get("data", {}).get("results", [])
         if not races:
             continue
-        weight = max(0.35, 1 - (now_local().year - record["season"]) * 0.18)
         for row in races[0].get("Results", []):
             driver_id = row.get("Driver", {}).get("driverId")
             team = row.get("Constructor", {}).get("name")
             grid = safe_int(row.get("grid"))
             finish = safe_int(row.get("positionOrder") or row.get("position"))
-            if not driver_id or not grid or not finish or grid <= 0:
-                continue
-            gain = grid - finish
-            driver_raw.setdefault(driver_id, []).append((gain, weight))
-            if team:
-                team_raw.setdefault(team, []).append((gain, weight))
+            if driver_id and grid and grid > 0 and finish:
+                gain = grid - finish
+                driver_raw.setdefault(driver_id, []).append((gain, weight))
+                if team:
+                    team_raw.setdefault(team, []).append((gain, weight))
     return normalize_scores({d: weighted_average(v) for d, v in driver_raw.items()}), normalize_scores({t: weighted_average(v) for t, v in team_raw.items()})
-
-
-def constructor_circuit_history_score_map(historical_records):
-    raw = {}
-    for record in historical_records:
-        races = record.get("data", {}).get("results", [])
-        if not races:
-            continue
-        weight = max(0.35, 1 - (now_local().year - record["season"]) * 0.18)
-        for row in races[0].get("Results", []):
-            team = row.get("Constructor", {}).get("name")
-            pos = safe_int(row.get("positionOrder") or row.get("position"))
-            if team and pos:
-                raw.setdefault(team, []).append((score_position(pos), weight))
-    return {team: weighted_average(values) for team, values in raw.items()}
 
 
 def reliability_score_map(historical_records):
     raw = {}
-    for record in historical_records:
-        races = record.get("data", {}).get("results", [])
+    for rec in historical_records:
+        weight = max(0.35, 1 - (now_local().year - rec["season"]) * 0.12)
+        races = rec.get("data", {}).get("results", [])
         if not races:
             continue
-        weight = max(0.35, 1 - (now_local().year - record["season"]) * 0.18)
         for row in races[0].get("Results", []):
             driver_id = row.get("Driver", {}).get("driverId")
             status = str(row.get("status", "")).lower()
             if not driver_id:
                 continue
             if "finished" in status or "+" in status:
-                score = 88
-            elif "accident" in status or "collision" in status or "spun" in status:
+                score = 90
+            elif any(x in status for x in ["accident", "collision", "spun"]):
                 score = 35
-            elif "engine" in status or "gearbox" in status or "hydraulics" in status:
+            elif any(x in status for x in ["engine", "gearbox", "hydraulics", "electrical"]):
                 score = 45
             else:
                 score = 55
@@ -1513,26 +1627,24 @@ def team_track_fit_score(team, profile, constructor_circuit_score=None):
     speed = str(profile.get("speed_profile", "")).lower()
     tyre = str(profile.get("tyre_stress", "")).lower()
     overtaking = str(profile.get("overtaking", "")).lower()
-
-    score = 50
+    score = 50.0
     if constructor_circuit_score is not None:
         score = weighted_average([(score, 0.35), (constructor_circuit_score, 0.65)])
-
     if "straight-line" in speed and any(k in team_text for k in ["williams", "red bull", "ferrari", "cadillac"]):
         score += 7
-    if "aero" in dominance and any(k in team_text for k in ["mclaren", "mercedes", "red bull"]):
+    if ("aero" in dominance or "downforce" in dominance) and any(k in team_text for k in ["mclaren", "mercedes", "red bull", "aston martin"]):
         score += 8
     if ("tyre" in dominance or tyre in {"high", "medium-high"}) and any(k in team_text for k in ["mclaren", "ferrari", "mercedes"]):
         score += 7
-    if ("track position" in dominance or "low" in overtaking) and any(k in team_text for k in ["ferrari", "mclaren", "mercedes"]):
+    if ("track position" in dominance or "low" in overtaking) and any(k in team_text for k in ["ferrari", "mclaren", "mercedes", "red bull"]):
         score += 5
-    if "traction" in dominance and any(k in team_text for k in ["red bull", "ferrari", "aston martin"]):
+    if "traction" in dominance and any(k in team_text for k in ["red bull", "ferrari", "aston martin", "racing bulls"]):
         score += 5
     return max(0, min(100, score))
 
 
 def setup_fastf1():
-    if not fastf1:
+    if fastf1 is None:
         return False
     try:
         FASTF1_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -1547,22 +1659,17 @@ def load_fastf1_session(season, round_no, code):
     if not setup_fastf1():
         return None
     try:
-        session = fastf1.get_session(season, int(round_no), code)
+        session = fastf1.get_session(int(season), int(round_no), code)
         session.load(laps=True, weather=True, messages=False)
         print(f"FastF1 loaded {season} round {round_no} {code}")
         return session
     except Exception as error:
-        print(f"FastF1 load skipped for {season} round {round_no} {code}: {error}")
+        print(f"FastF1 skipped {season} round {round_no} {code}: {error}")
         return None
 
 
 def fastf1_enhancement_scores(season, round_no):
-    scores = {
-        "fastf1_race_pace": {},
-        "fastf1_consistency": {},
-        "fastf1_tyre_stint": {},
-        "sessions_loaded": [],
-    }
+    scores = {"fastf1_race_pace": {}, "fastf1_consistency": {}, "fastf1_tyre_stint": {}, "sessions_loaded": []}
     if not setup_fastf1():
         return scores
 
@@ -1586,30 +1693,26 @@ def fastf1_enhancement_scores(season, round_no):
             pace_raw = {}
             consistency_raw = {}
             stint_raw = {}
-
             for driver, group in clean.groupby("Driver"):
                 times = []
-                for value in group.get("LapTime", []):
+                for lap_time in group.get("LapTime", []):
                     try:
-                        sec = value.total_seconds()
+                        sec = lap_time.total_seconds()
                     except Exception:
                         sec = None
                     if sec and 45 <= sec <= 180:
                         times.append(sec)
                 if len(times) >= 4:
-                    sorted_times = sorted(times)
-                    sample = sorted_times[:max(4, int(len(sorted_times) * 0.35))]
+                    sample = sorted(times)[:max(4, int(len(times) * 0.35))]
                     pace_raw[str(driver).lower()] = average(sample)
-                    consistency_raw[str(driver).lower()] = float(np.std(sample))
+                    consistency_raw[str(driver).lower()] = float(np.std(sample)) if len(sample) > 1 else None
                 if "Stint" in group.columns:
                     stint_raw[str(driver).lower()] = float(group.groupby("Stint").size().max())
-
-            # We use driver code keys. Jolpica driver ids are different, so these are exposed in debug.
             scores["fastf1_race_pace"].update(normalize_scores(pace_raw, reverse=True))
             scores["fastf1_consistency"].update(normalize_scores(consistency_raw, reverse=True))
             scores["fastf1_tyre_stint"].update(normalize_scores(stint_raw))
         except Exception as error:
-            print(f"FastF1 score extraction failed for {code}: {error}")
+            print(f"FastF1 extraction failed for {code}: {error}")
     return scores
 
 
@@ -1623,12 +1726,11 @@ def driver_code_guess(name):
 def get_prediction_stage(current_round_data, event_start):
     has_qualifying = bool(current_round_data.get("qualifying"))
     has_results = bool(current_round_data.get("results"))
-    now = now_local()
-    if has_results and now > event_start:
+    if has_results and now_local() > event_start:
         return "post-race-data", "Post-race data, historical update"
     if has_qualifying:
         return "post-qualifying", "Post-qualifying prediction"
-    if event_start - now <= timedelta(days=3):
+    if event_start - now_local() <= timedelta(days=3):
         return "race-weekend", "Race-weekend prediction"
     return "pre-weekend", "Pre-weekend prediction"
 
@@ -1638,29 +1740,32 @@ def get_prediction_weights(profile, weather_summary, stage):
     tyre = str(profile.get("tyre_stress", "unknown")).lower()
     dominance = str(profile.get("dominance", "")).lower()
     speed = str(profile.get("speed_profile", "")).lower()
-
     rain = weather_summary.get("rain_score", 0)
     heat = weather_summary.get("heat_score", 0)
     wind = weather_summary.get("wind_score", 0)
 
     weights = {
-        "ml_win_probability": 0.09,
-        "ml_podium_probability": 0.13,
-        "ml_top10_probability": 0.07,
-        "driver_form": 0.10,
-        "car_performance": 0.11,
-        "recent_result": 0.06,
-        "qualifying": 0.09,
-        "circuit_history": 0.09,
-        "race_pace": 0.08,
+        "ml_win_probability": 0.08,
+        "ml_podium_probability": 0.12,
+        "ml_top10_probability": 0.06,
+        "driver_form": 0.07,
+        "driver_skill": 0.06,
+        "car_performance": 0.09,
+        "constructor_form": 0.07,
+        "recent_result": 0.05,
+        "qualifying": 0.08,
+        "circuit_history": 0.07,
+        "race_pace": 0.07,
         "pit_execution": 0.05,
-        "team_strategy": 0.06,
+        "team_strategy": 0.05,
         "reliability": 0.04,
-        "team_track_fit": 0.05,
+        "team_track_fit": 0.06,
         "weather_adaptation": 0.04,
-        "fastf1_race_pace": 0.08,
+        "track_trait_fit": 0.05,
+        "sprint_performance": 0.03,
+        "fastf1_race_pace": 0.06,
         "fastf1_consistency": 0.03,
-        "fastf1_tyre_stint": 0.03,
+        "fastf1_tyre_stint": 0.02,
     }
 
     if stage == "post-qualifying":
@@ -1669,107 +1774,117 @@ def get_prediction_weights(profile, weather_summary, stage):
     elif stage == "race-weekend":
         weights["fastf1_race_pace"] += 0.05
         weights["fastf1_consistency"] += 0.03
-    elif stage == "pre-weekend":
-        weights["driver_form"] += 0.04
-        weights["car_performance"] += 0.04
-        weights["circuit_history"] += 0.03
+    else:
+        weights["driver_form"] += 0.03
+        weights["car_performance"] += 0.03
+        weights["circuit_history"] += 0.02
 
     if "low" in overtaking:
         weights["qualifying"] += 0.08
         weights["pit_execution"] += 0.03
         weights["team_strategy"] += 0.03
     if "good" in overtaking:
-        weights["race_pace"] += 0.05
+        weights["race_pace"] += 0.04
         weights["team_strategy"] += 0.03
     if tyre in {"high", "medium-high"} or heat >= 60:
         weights["race_pace"] += 0.04
         weights["pit_execution"] += 0.03
         weights["fastf1_tyre_stint"] += 0.03
     if rain >= 35:
-        weights["reliability"] += 0.06
+        weights["reliability"] += 0.05
         weights["weather_adaptation"] += 0.07
         weights["team_strategy"] += 0.04
     if wind >= 60:
         weights["reliability"] += 0.03
         weights["weather_adaptation"] += 0.03
-    if "straight-line" in speed or "aero" in dominance:
+    if "straight-line" in speed or "aero" in dominance or "downforce" in dominance:
         weights["car_performance"] += 0.04
         weights["team_track_fit"] += 0.04
+        weights["track_trait_fit"] += 0.03
 
-    for k in list(weights):
-        weights[k] = max(0, weights[k])
-    total = sum(weights.values())
-    return {k: v / total for k, v in weights.items()}
+    total = sum(max(0, value) for value in weights.values())
+    return {key: max(0, value) / total for key, value in weights.items()}
 
 
 def rank_prediction(drivers, constructor_standings, last_results, current_round_data, historical_records, profile, weather_summary, ml_outputs, fastf1_scores, stage):
     weights = get_prediction_weights(profile, weather_summary, stage)
 
-    driver_points_raw = {d["driver_id"]: d["points"] for d in drivers}
-    driver_form = normalize_scores(driver_points_raw)
-    constructor_scores = constructor_score_map(constructor_standings)
-    recent_scores = current_result_score_map(last_results)
-    qualifying_scores = qualifying_score_map(current_round_data)
-    circuit_scores = circuit_history_score_map(historical_records)
+    driver_points = {d["driver_id"]: d["points"] for d in drivers}
+    driver_form = normalize_scores(driver_points)
+    constructor_form = constructor_score_map(constructor_standings)
+    recent = current_result_score_map(last_results)
+    qualifying = qualifying_score_map(current_round_data)
+    sprint = sprint_score_map(current_round_data)
+    circuit = circuit_history_score_map(historical_records)
     race_pace = race_pace_score_map(historical_records, current_round_data)
-    driver_pit, constructor_pit = pit_execution_score_maps(historical_records, current_round_data)
-    driver_strategy, constructor_strategy = strategy_gain_score_maps(historical_records)
+    driver_pit, team_pit = pit_execution_score_maps(historical_records, current_round_data)
+    driver_strategy, team_strategy_map = strategy_gain_score_maps(historical_records)
     reliability = reliability_score_map(historical_records)
-    constructor_circuit = constructor_circuit_history_score_map(historical_records)
+    constructor_circuit = constructor_circuit_score_map(historical_records)
 
     predictions = []
-
     for driver in drivers:
         driver_id = driver["driver_id"]
         team = driver["team"]
-        code_key = driver_code_guess(driver["name"])
+        code = driver_code_guess(driver["name"])
+        ml = ml_outputs.get(driver_id, {})
 
-        car_performance = weighted_average([(constructor_scores.get(team), 0.70), (constructor_circuit.get(team), 0.30)])
-        pit_execution = weighted_average([(driver_pit.get(driver_id), 0.45), (constructor_pit.get(team), 0.55)])
-        team_strategy = weighted_average([(driver_strategy.get(driver_id), 0.45), (constructor_strategy.get(team), 0.40), (constructor_pit.get(team), 0.15)])
+        car_performance = weighted_average([(constructor_form.get(team), 0.7), (constructor_circuit.get(team), 0.3)])
+        pit_execution = weighted_average([(driver_pit.get(driver_id), 0.45), (team_pit.get(team), 0.55)])
+        team_strategy = weighted_average([(driver_strategy.get(driver_id), 0.45), (team_strategy_map.get(team), 0.4), (team_pit.get(team), 0.15)])
         track_fit = team_track_fit_score(team, profile, constructor_circuit.get(team))
+        driver_skill = weighted_average([
+            (driver_form.get(driver_id), 0.4),
+            (circuit.get(driver_id), 0.25),
+            (race_pace.get(driver_id), 0.2),
+            (reliability.get(driver_id), 0.15),
+        ])
         weather_adaptation = weighted_average([
             (reliability.get(driver_id), 0.35),
-            (circuit_scores.get(driver_id), 0.30),
+            (circuit.get(driver_id), 0.25),
             (race_pace.get(driver_id), 0.20),
-            (team_strategy, 0.15),
+            (team_strategy, 0.20),
         ])
-        ml = ml_outputs.get(driver_id, {})
+        track_trait_fit = weighted_average([
+            (track_fit, 0.5),
+            (car_performance, 0.35),
+            (pit_execution, 0.15),
+        ])
 
         component_scores = {
             "ml_win_probability": ml.get("ml_win_probability"),
             "ml_podium_probability": ml.get("ml_podium_probability"),
             "ml_top10_probability": ml.get("ml_top10_probability"),
             "driver_form": driver_form.get(driver_id),
+            "driver_skill": driver_skill,
             "car_performance": car_performance,
-            "recent_result": recent_scores.get(driver_id),
-            "qualifying": qualifying_scores.get(driver_id),
-            "circuit_history": circuit_scores.get(driver_id),
+            "constructor_form": constructor_form.get(team),
+            "recent_result": recent.get(driver_id),
+            "qualifying": qualifying.get(driver_id),
+            "circuit_history": circuit.get(driver_id),
             "race_pace": race_pace.get(driver_id),
             "pit_execution": pit_execution,
             "team_strategy": team_strategy,
             "reliability": reliability.get(driver_id),
             "team_track_fit": track_fit,
             "weather_adaptation": weather_adaptation,
-            "fastf1_race_pace": fastf1_scores.get("fastf1_race_pace", {}).get(code_key),
-            "fastf1_consistency": fastf1_scores.get("fastf1_consistency", {}).get(code_key),
-            "fastf1_tyre_stint": fastf1_scores.get("fastf1_tyre_stint", {}).get(code_key),
+            "track_trait_fit": track_trait_fit,
+            "sprint_performance": sprint.get(driver_id),
+            "fastf1_race_pace": fastf1_scores.get("fastf1_race_pace", {}).get(code),
+            "fastf1_consistency": fastf1_scores.get("fastf1_consistency", {}).get(code),
+            "fastf1_tyre_stint": fastf1_scores.get("fastf1_tyre_stint", {}).get(code),
         }
 
-        score = weighted_average([(component_scores.get(k), w) for k, w in weights.items()])
-        if score is None:
-            score = 0
+        score = weighted_average([(component_scores.get(k), w) for k, w in weights.items()]) or 0
         available_weight = sum(w for k, w in weights.items() if component_scores.get(k) is not None)
         confidence = min(100, max(0, available_weight * 100))
 
-        sorted_reasons = sorted(
+        reasons = sorted(
             [(k, v) for k, v in component_scores.items() if v is not None],
             key=lambda item: item[1] * weights.get(item[0], 0),
             reverse=True,
         )
-        reason_names = [PREDICTION_LABELS.get(k, k.replace("_", " ")) for k, v in sorted_reasons[:5] if v >= 35]
-        if not reason_names:
-            reason_names = ["limited free-data evidence"]
+        reason_names = [PREDICTION_LABELS.get(k, k) for k, v in reasons[:5] if v >= 35] or ["limited cached data evidence"]
 
         predictions.append({
             "name": driver["name"],
@@ -1778,7 +1893,7 @@ def rank_prediction(drivers, constructor_standings, last_results, current_round_
             "score": round(score, 2),
             "confidence": round(confidence, 1),
             "reason": "; ".join(reason_names),
-            "component_scores": {k: (round(v, 2) if v is not None else None) for k, v in component_scores.items()},
+            "component_scores": {k: round(v, 2) if v is not None else None for k, v in component_scores.items()},
             "image": None,
             "team_colour": None,
         })
@@ -1789,27 +1904,25 @@ def rank_prediction(drivers, constructor_standings, last_results, current_round_
         f"{idx}. {item['name']}, score {item['score']:.1f}, confidence {item['confidence']:.0f}%, {item['reason']}"
         for idx, item in enumerate(top10, start=1)
     )
-
     model = {
-        "source": "Hybrid free-data ML ensemble: Jolpica + FastF1 + Open-Meteo + ICS",
-        "logic": "Mintlify-style feature groups plus local free-data ensemble: grid, driver history, team form, circuit experience, weather, tyre strategy, race pace, pit execution, and race simulation scenarios",
+        "source": "Hybrid full-data cache model: Jolpica full history + FastF1 + Open-Meteo + ICS",
+        "logic": "Mintlify-style feature groups plus full-data racing ensemble: grid, driver history, team form, car performance, circuit experience, track traits, weather traits, tyre strategy, lap pace, pit stops, sprint, reliability, and race simulation scenarios",
         "prediction_stage": stage,
         "weights": {k: round(v, 4) for k, v in weights.items()},
         "available_components": {
             "ml_outputs": len(ml_outputs),
             "driver_form": len(driver_form),
-            "constructor_form": len(constructor_scores),
-            "recent_result": len(recent_scores),
-            "qualifying": len(qualifying_scores),
-            "circuit_history": len(circuit_scores),
+            "constructor_form": len(constructor_form),
+            "recent_result": len(recent),
+            "qualifying": len(qualifying),
+            "sprint": len(sprint),
+            "circuit_history": len(circuit),
             "race_pace": len(race_pace),
-            "driver_pit_execution": len(driver_pit),
-            "constructor_pit_execution": len(constructor_pit),
-            "driver_strategy": len(driver_strategy),
-            "constructor_strategy": len(constructor_strategy),
+            "pit_execution_drivers": len(driver_pit),
+            "strategy_drivers": len(driver_strategy),
             "reliability": len(reliability),
-            "constructor_circuit_history": len(constructor_circuit),
             "fastf1_sessions_loaded": fastf1_scores.get("sessions_loaded", []),
+            "backfill_used_this_run": BACKFILL_BUDGET.used,
         },
     }
     return text, top10, model
@@ -1817,46 +1930,37 @@ def rank_prediction(drivers, constructor_standings, last_results, current_round_
 
 def get_dynamic_team_fit(top10, constructor_standings):
     scores = {}
-    constructor_scores = constructor_score_map(constructor_standings)
-    for team, score in constructor_scores.items():
+    for team, score in constructor_score_map(constructor_standings).items():
         scores[team] = scores.get(team, 0) + score * 0.45
-    for index, item in enumerate(top10):
+    for idx, item in enumerate(top10):
         team = item.get("team") or "Unknown Team"
-        scores[team] = scores.get(team, 0) + (10 - index) * 8
+        scores[team] = scores.get(team, 0) + (10 - idx) * 8
     return [team for team, _ in sorted(scores.items(), key=lambda item: item[1], reverse=True)[:5]]
 
 
 def pit_window_from_profile(profile, weather_summary):
-    rain_score = weather_summary.get("rain_score", 0)
-    tyre_stress = profile.get("tyre_stress", "unknown")
-    if rain_score >= 50:
+    rain = weather_summary.get("rain_score", 0)
+    tyre = profile.get("tyre_stress", "unknown")
+    if rain >= 50:
         return "Delay fixed dry-tyre stops. Watch radar and react to rain onset."
-    if tyre_stress == "high":
+    if tyre == "high":
         return "Lap 14-24 for aggressive two-stop, lap 22-32 for conservative one-stop."
-    if tyre_stress == "medium-high":
+    if tyre == "medium-high":
         return "Lap 16-28, with safety car flexibility."
-    if tyre_stress == "medium":
+    if tyre == "medium":
         return "Lap 18-32 for normal dry strategy."
-    if tyre_stress == "low-medium":
+    if tyre == "low-medium":
         return "Lap 24-40 if track position is secure."
-    return "Unavailable until pit-stop history improves."
+    return "Unavailable until more cached pit-stop history is available."
 
 
-# -----------------------------
-# Briefing, files, email, GitHub
-# -----------------------------
-
-def generate_briefing(event, race, profile, weather_summary, top10_text, prediction_model, team_fit):
-    start_str = event["start"].strftime("%A, %d %B %Y, %I:%M %p %Z")
+def generate_briefing(event, race, profile, weather, top10_text, prediction_model, team_fit):
     title = f"F1 Briefing: {event['title']}"
+    start_str = event["start"].strftime("%A, %d %B %Y, %I:%M %p %Z")
     reasons = profile["dynamic_reasons"]
     metrics = profile["dynamic_track_metrics"]
-    pit_window = pit_window_from_profile(profile, weather_summary)
-
-    weights_text = "\n".join(
-        f"- {key.replace('_', ' ')}: {value * 100:.1f}%"
-        for key, value in prediction_model.get("weights", {}).items()
-    )
+    weights_text = "\n".join(f"- {k.replace('_', ' ')}: {v * 100:.1f}%" for k, v in prediction_model.get("weights", {}).items())
+    team_text = "\n".join([f"- {idx + 1}. {team}" for idx, team in enumerate(team_fit)]) if team_fit else "- Unavailable"
 
     briefing = f"""# {title}
 
@@ -1876,17 +1980,20 @@ Generated: {now_local().strftime("%A, %d %B %Y, %I:%M %p %Z")}
 
 ## 2. Weather briefing
 
-- Weather source: {weather_summary['source']}
-- Air temperature: {weather_summary['temperature']}
-- Track temperature: {weather_summary['track_temperature']}
-- Rain: {weather_summary['rain']}
-- Humidity: {weather_summary['humidity']}
-- Wind: {weather_summary['wind']}
-- Strategy impact: {weather_summary['impact']}
+- Weather source: {weather['source']}
+- Air temperature: {weather['temperature']}
+- Track temperature: {weather['track_temperature']}
+- Rain: {weather['rain']}
+- Humidity: {weather['humidity']}
+- Wind: {weather['wind']}
+- Wind gust: {weather.get('wind_gust', 'Unavailable')}
+- Cloud cover: {weather.get('cloud_cover', 'Unavailable')}
+- Strategy impact: {weather['impact']}
 
-## 3. Dynamic track model
+## 3. Dynamic track and car trait model
 
 - Dominance: {profile['dominance']}
+- Car trait: {profile['car_trait']}
 - Speed profile: {profile['speed_profile']} ({reasons['speed_profile']})
 - Tyre stress: {profile['tyre_stress']} ({reasons['tyre_stress']})
 - Overtaking: {profile['overtaking']} ({reasons['overtaking']})
@@ -1897,16 +2004,16 @@ Generated: {now_local().strftime("%A, %d %B %Y, %I:%M %p %Z")}
 
 - Source: {profile['dynamic_track_source']['source']}
 - Historical races sampled: {metrics['historical_races_sampled']}
-- Results sampled: {metrics['results_sampled']}
-- Qualifying rows sampled: {metrics['qualifying_rows_sampled']}
-- Pit stops sampled: {metrics['pitstops_sampled']}
 - Average overtake delta: {metrics['average_overtake_delta']}
 - Average stops per driver: {metrics['average_stops_per_driver']}
+- DNF rate: {metrics['dnf_rate']}
+- Lap consistency: {metrics['lap_consistency']}
+- Full-data backfill used this run: {metrics['backfill_used_this_run']}
 - Prediction stage: {prediction_model.get('prediction_stage_label', prediction_model.get('prediction_stage', 'Unknown'))}
 
 ## 4. Team advantage estimate
 
-{chr(10).join([f"- {idx + 1}. {team}" for idx, team in enumerate(team_fit)]) if team_fit else "- Unavailable until standings data is available"}
+{team_text}
 
 ## 5. Tyre strategy
 
@@ -1914,11 +2021,11 @@ Generated: {now_local().strftime("%A, %d %B %Y, %I:%M %p %Z")}
 - Safest dry approach: conservative one-stop if degradation data stays controlled.
 - Aggressive dry approach: early undercut or two-stop if tyre stress rises.
 - Wet-weather adjustment: if rain probability rises, delay fixed dry-compound plans.
-- Pit window: {pit_window}
+- Pit window: {pit_window_from_profile(profile, weather)}
 
 ## 6. Pit stop strategy
 
-- Likely number of stops: inferred from historical pit-stop data where available.
+- Likely number of stops: inferred from full cached historical pit-stop data.
 - Safety car response: pit if the loss is lower and track position can be retained.
 - Virtual safety car response: pit if tyre age is near the planned window.
 - Avoid pitting into traffic, especially where overtaking is low.
@@ -1929,9 +2036,9 @@ Generated: {now_local().strftime("%A, %d %B %Y, %I:%M %p %Z")}
 
 ## 8. Potential top 10 prediction
 
-Prediction status: dynamic but not guaranteed. This hybrid model combines Mintlify-style F1 ML feature groups with free data from Jolpica, FastF1, Open-Meteo, and your ICS calendar. It uses driver history, grid/qualifying, car and team form, circuit experience, weather, tyre strategy, race pace, pit execution, reliability, and race-simulation scenario logic.
+Prediction status: dynamic but not guaranteed. This model uses Mintlify-style F1 feature groups plus your own full cached free-data system: grid position, driver skills, constructor and car performance, previous results, same-circuit results, track traits, weather traits, tyre degradation proxy, pit-stop data, lap pace, sprint data, reliability, and FastF1 signals where available.
 
-{top10_text if top10_text else "Unavailable until standings/session data is available."}
+{top10_text if top10_text else "Unavailable until enough data is cached."}
 
 ## 8A. Prediction model weights
 
@@ -1939,24 +2046,24 @@ Prediction status: dynamic but not guaranteed. This hybrid model combines Mintli
 
 ## 9. What to watch
 
-- Whether current-round qualifying becomes available before race start.
-- Whether weather changes alter the first pit window.
-- Whether circuit history suggests track position or race pace matters more.
-- Whether constructor form matches the circuit demand.
-- Whether pit execution and strategy gain change the final race order.
+- Qualifying and grid position if this is a low-overtaking circuit.
+- Tyre degradation and pit timing if cached history shows high pit-stop frequency.
+- Weather changes if rain, wind, heat, or cloud cover moves before race start.
+- Team-car fit against the circuit trait: straight-line, downforce, traction, braking, or tyre management.
+- Whether FastF1 session data confirms or contradicts the historical model.
 
 ---
 
-Generated by the free hybrid F1 briefing bot.
+Generated by the F1 Race Intel full-data hybrid model.
 """
     return title, briefing
 
 
 def save_markdown(event, briefing):
     BRIEFINGS_DIR.mkdir(exist_ok=True)
-    date_part = event["start"].strftime("%Y-%m-%d")
+    date = event["start"].strftime("%Y-%m-%d")
     slug = make_slug(event["title"])
-    path = BRIEFINGS_DIR / f"{date_part}-{slug}.md"
+    path = BRIEFINGS_DIR / f"{date}-{slug}.md"
     path.write_text(briefing, encoding="utf-8")
     return path
 
@@ -1964,24 +2071,12 @@ def save_markdown(event, briefing):
 def save_run_status(status, details):
     BRIEFINGS_DIR.mkdir(exist_ok=True)
     path = BRIEFINGS_DIR / "latest-run-status.md"
-    content = f"""# F1 Briefing Bot Run Status
-
-Generated: {now_local().strftime("%A, %d %B %Y, %I:%M %p %Z")}
-
-Status: {status}
-
-## Details
-
-{details}
-"""
-    path.write_text(content, encoding="utf-8")
+    path.write_text(f"# F1 Race Intel Run Status\n\nGenerated: {now_local().strftime('%A, %d %B %Y, %I:%M %p %Z')}\n\nStatus: {status}\n\n## Details\n\n{details}\n", encoding="utf-8")
     return path
 
 
-def update_index(event, race, profile, weather_summary, markdown_path, title, top10, team_fit, prediction_model):
-    BRIEFINGS_DIR.mkdir(exist_ok=True)
+def update_index(event, race, profile, weather, markdown_path, title, top10, team_fit, prediction_model):
     index_path = BRIEFINGS_DIR / "index.json"
-
     entry = {
         "title": title,
         "path": str(markdown_path.relative_to(BASE_DIR)).replace("\\", "/"),
@@ -1995,38 +2090,38 @@ def update_index(event, race, profile, weather_summary, markdown_path, title, to
         "circuit": profile["circuit"],
         "city": profile["city"],
         "country": profile["country"],
-        "circuit_key": profile.get("circuit_key"),
-        "meeting_key": profile.get("meeting_key"),
+        "circuit_key": profile["circuit_key"],
+        "meeting_key": profile["meeting_key"],
         "track_type": profile["track_type"],
         "dominance": profile["dominance"],
         "speed_profile": profile["speed_profile"],
+        "car_trait": profile["car_trait"],
         "overtaking": profile["overtaking"],
         "tyre_stress": profile["tyre_stress"],
         "safety_car": profile["safety_car"],
         "strategy_bias": profile["strategy_bias"],
-        "pit_window": pit_window_from_profile(profile, weather_summary),
+        "pit_window": pit_window_from_profile(profile, weather),
         "setup": profile["setup"],
         "team_fit": team_fit,
-        "weather": weather_summary,
+        "weather": weather,
         "top10": top10,
         "prediction_model": prediction_model,
         "dynamic_track_source": profile["dynamic_track_source"],
         "dynamic_track_metrics": profile["dynamic_track_metrics"],
         "dynamic_reasons": profile["dynamic_reasons"],
     }
-
     if index_path.exists():
         try:
             data = json.loads(index_path.read_text(encoding="utf-8"))
             briefings = data.get("briefings", []) if isinstance(data, dict) else data
             if not isinstance(briefings, list):
                 briefings = []
-        except json.JSONDecodeError:
+        except Exception:
             briefings = []
     else:
         briefings = []
 
-    briefings = [item for item in briefings if item.get("path") != entry["path"]]
+    briefings = [x for x in briefings if x.get("path") != entry["path"]]
     briefings.insert(0, entry)
     briefings = briefings[:60]
     index_path.write_text(json.dumps({"briefings": briefings}, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -2034,7 +2129,6 @@ def update_index(event, race, profile, weather_summary, markdown_path, title, to
 
 
 def save_debug(payload):
-    DATA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = DATA_CACHE_DIR / "latest-model-debug.json"
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     return path
@@ -2045,23 +2139,20 @@ def send_email(subject, body):
         print("Email disabled.")
         return False
     try:
-        message = MIMEMultipart("alternative")
-        message["From"] = EMAIL_ADDRESS
-        message["To"] = EMAIL_TO
-        message["Subject"] = subject
-
-        message.attach(MIMEText(body, "plain", "utf-8"))
-        html_body = "<html><body style='font-family:Arial,sans-serif;line-height:1.55;background:#050505;color:#f5f0ea;padding:24px;'>" + \
-            "<pre style='white-space:pre-wrap;font-family:Arial,sans-serif'>" + body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") + "</pre></body></html>"
-        message.attach(MIMEText(html_body, "html", "utf-8"))
-
+        msg = MIMEMultipart("alternative")
+        msg["From"] = EMAIL_ADDRESS
+        msg["To"] = EMAIL_TO
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        html = "<html><body style='font-family:Arial,sans-serif;line-height:1.55;background:#050505;color:#f5f0ea;padding:24px;'><pre style='white-space:pre-wrap;font-family:Arial,sans-serif'>" + body.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;") + "</pre></body></html>"
+        msg.attach(MIMEText(html, "html", "utf-8"))
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(EMAIL_ADDRESS, EMAIL_APP_PASSWORD)
-            server.send_message(message)
+            server.send_message(msg)
         print("Email sent.")
         return True
     except Exception as error:
-        print(f"Email failed, but workflow will continue: {error}")
+        print(f"Email failed: {error}")
         return False
 
 
@@ -2097,16 +2188,15 @@ def create_or_update_issue(title, body):
     if existing:
         for issue in existing:
             if issue.get("title") == title:
-                number = issue["number"]
-                github_api("PATCH", f"/issues/{number}", {"body": body})
-                print(f"Updated issue #{number}.")
+                github_api("PATCH", f"/issues/{issue['number']}", {"body": body})
+                print(f"Updated issue #{issue['number']}.")
                 return
     github_api("POST", "/issues", {"title": title, "body": body, "labels": ["f1-briefing"]})
     print("Created issue.")
 
 
 def commit_and_push(paths):
-    paths = [Path(path) for path in paths if path]
+    paths = [Path(p) for p in paths if p]
     subprocess.run(["git", "config", "user.name", "github-actions[bot]"], check=True)
     subprocess.run(["git", "config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"], check=True)
 
@@ -2114,32 +2204,31 @@ def commit_and_push(paths):
         if path.exists():
             subprocess.run(["git", "add", str(path)], check=True)
 
+    # Include full-race cache files generated this run.
+    if FULL_RACE_CACHE_DIR.exists():
+        subprocess.run(["git", "add", str(FULL_RACE_CACHE_DIR)], check=True)
+
     diff = subprocess.run(["git", "diff", "--cached", "--quiet"])
     if diff.returncode == 0:
         print("No file changes to commit.")
         return
-
-    subprocess.run(["git", "commit", "-m", "Update F1 briefing data and ML model"], check=True)
+    subprocess.run(["git", "commit", "-m", "Update F1 full-data model and briefing"], check=True)
     subprocess.run(["git", "push"], check=True)
-    print("Committed and pushed briefing data.")
+    print("Committed and pushed generated data.")
 
 
 def write_skip_outputs(subject, details):
     status_path = save_run_status("Skipped", details)
-    safe_step("Commit status file", commit_and_push, [status_path])
-    safe_step("Create or update status issue", create_or_update_issue, "F1 Briefing Bot Status", details)
-    safe_step("Send status email", send_email, subject, details)
+    safe_step("Commit status", commit_and_push, [status_path])
+    safe_step("Issue status", create_or_update_issue, "F1 Race Intel Status", details)
+    safe_step("Email status", send_email, subject, details)
 
-
-# -----------------------------
-# Main
-# -----------------------------
 
 def run(force_retrain=False):
     ensure_dirs()
     require_env_vars()
 
-    bundle = safe_step("Train or load ML model", train_ml_model, force_retrain)
+    bundle = safe_step("Train/load full-data ML model", train_ml_model, force_retrain)
     if not bundle:
         bundle = load_ml_bundle()
 
@@ -2148,48 +2237,37 @@ def run(force_retrain=False):
     if not event:
         details = f"No F1 event found in the next {LOOKAHEAD_DAYS} days."
         print(details)
-        write_skip_outputs("F1 Briefing Bot: Skipped", details)
+        write_skip_outputs("F1 Race Intel: Skipped", details)
         return
 
     race = find_best_race(event)
     if not race:
-        details = (
-            "Found a calendar event, but no matching Jolpica race was found.\n\n"
-            f"Calendar event: {event['title']}\n"
-            f"Start: {event['start']}\n"
-            f"Location: {event.get('location', 'Not provided')}"
-        )
+        details = f"Found calendar event but could not match Jolpica race.\n\nEvent: {event['title']}\nStart: {event['start']}\nLocation: {event.get('location')}"
         print(details)
-        write_skip_outputs("F1 Briefing Bot: Jolpica Race Not Found", details)
+        write_skip_outputs("F1 Race Intel: Race Not Matched", details)
         return
 
     season = safe_int(race.get("season")) or event["start"].year
     round_no = race.get("round")
 
+    current_round_data = fetch_round_data_cached(season, round_no, allow_backfill=False, force_fetch=True)
     driver_standings = fetch_driver_standings(season)
     constructor_standings = fetch_constructor_standings(season)
     last_results = fetch_last_results(season)
-    current_round_data = fetch_round_data(season, round_no) if round_no else {"results": [], "qualifying": [], "pitstops": [], "laps": []}
-    historical_records = fetch_historical_same_circuit(race, years_back=4)
+    historical_records = fetch_historical_same_circuit(race, years_back=5)
 
     if not driver_standings:
-        details = (
-            "Matched a Jolpica race, but driver standings were not available.\n\n"
-            f"Race: {race.get('raceName')}\n"
-            f"Season: {season}\n"
-            f"Round: {round_no}"
-        )
+        details = f"Matched {race.get('raceName')} but driver standings are unavailable."
         print(details)
-        write_skip_outputs("F1 Briefing Bot: Driver Standings Missing", details)
+        write_skip_outputs("F1 Race Intel: Driver Standings Missing", details)
         return
 
     drivers = standings_to_drivers(driver_standings)
-    weather_summary = fetch_weather_for_race(race, event["start"])
-    historical_weather = safe_step("Fetch historical weather", fetch_historical_weather_summary, race, 3) or {}
-    profile = infer_track_profile(race, historical_records, weather_summary, historical_weather)
+    weather = fetch_weather_for_race(race, event["start"])
+    historical_weather = safe_step("Historical weather", fetch_historical_weather_summary, race, 5) or {}
+    profile = infer_track_profile(race, historical_records, weather, historical_weather)
 
     stage, stage_label = get_prediction_stage(current_round_data, event["start"])
-
     ml_outputs, ml_debug = ml_predict_probabilities(drivers, race, current_round_data, bundle)
     fastf1_scores = safe_step("FastF1 enhancement", fastf1_enhancement_scores, season, round_no) or {"sessions_loaded": []}
 
@@ -2200,7 +2278,7 @@ def run(force_retrain=False):
         current_round_data=current_round_data,
         historical_records=historical_records,
         profile=profile,
-        weather_summary=weather_summary,
+        weather_summary=weather,
         ml_outputs=ml_outputs,
         fastf1_scores=fastf1_scores,
         stage=stage,
@@ -2214,45 +2292,48 @@ def run(force_retrain=False):
     }
 
     team_fit = get_dynamic_team_fit(top10, constructor_standings)
-
-    title, briefing = generate_briefing(
-        event=event,
-        race=race,
-        profile=profile,
-        weather_summary=weather_summary,
-        top10_text=top10_text,
-        prediction_model=prediction_model,
-        team_fit=team_fit,
-    )
+    title, briefing = generate_briefing(event, race, profile, weather, top10_text, prediction_model, team_fit)
 
     markdown_path = save_markdown(event, briefing)
-    index_path = update_index(event, race, profile, weather_summary, markdown_path, title, top10, team_fit, prediction_model)
-    status_path = save_run_status(
-        "Success",
-        f"Generated hybrid ML F1 briefing successfully.\n\nTitle: {title}\nMarkdown: {markdown_path}\nIndex: {index_path}\nPrediction stage: {stage_label}",
-    )
+    index_path = update_index(event, race, profile, weather, markdown_path, title, top10, team_fit, prediction_model)
+    status_path = save_run_status("Success", f"Generated full-data hybrid F1 briefing.\n\nTitle: {title}\nBackfill used this run: {BACKFILL_BUDGET.used}")
     debug_path = save_debug({
         "generated_at": now_local().isoformat(),
         "event": event,
         "race": race,
         "prediction_model": prediction_model,
         "top10": top10,
-        "weather": weather_summary,
+        "weather": weather,
         "historical_weather": historical_weather,
         "track_profile": profile,
         "ml_debug": ml_debug,
         "fastf1_scores": fastf1_scores,
+        "backfill": {
+            "limit": BACKFILL_BUDGET.limit,
+            "used": BACKFILL_BUDGET.used,
+            "races": BACKFILL_BUDGET.fetched,
+        },
     })
 
-    paths = [markdown_path, index_path, status_path, debug_path, MODEL_BUNDLE_PATH, MODEL_META_PATH, DATA_CACHE_DIR / "ml_race_results_raw.csv", DATA_CACHE_DIR / "ml_race_features.csv"]
-    safe_step("Commit briefing/model files", commit_and_push, paths)
+    paths = [
+        markdown_path,
+        index_path,
+        status_path,
+        debug_path,
+        MODEL_BUNDLE_PATH,
+        MODEL_META_PATH,
+        DATA_CACHE_DIR / "ml_full_race_results_raw.csv",
+        DATA_CACHE_DIR / "ml_full_race_features.csv",
+    ]
+
+    safe_step("Commit generated files", commit_and_push, paths)
     safe_step("Create or update issue", create_or_update_issue, title, briefing)
     safe_step("Send email", send_email, title, briefing)
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Hybrid free-data F1 briefing and ML prediction bot.")
-    parser.add_argument("--force-retrain", action="store_true", help="Force retraining of the ML model.")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--force-retrain", action="store_true")
     return parser.parse_args()
 
 
