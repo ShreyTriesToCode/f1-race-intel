@@ -1,0 +1,107 @@
+name: F1 Briefing, ML Retrain, Issue, Email
+
+on:
+  schedule:
+    # Daily normal update
+    - cron: "30 3 * * *"
+    # Race-weekend refresh: every 6 hours from Thursday to Sunday
+    - cron: "0 */6 * * 4,5,6,0"
+  workflow_dispatch:
+    inputs:
+      force_retrain:
+        description: "Force retrain ML model"
+        required: false
+        default: "false"
+      lookahead_days:
+        description: "How many days ahead to search for F1 calendar events"
+        required: false
+        default: "90"
+      send_email:
+        description: "Send email after generation"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: f1-briefing-bot
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: "requirements.txt"
+
+      - name: Restore FastF1 and model caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            fastf1_cache
+            data_cache/http
+          key: f1-data-cache-${{ runner.os }}-${{ hashFiles('f1_briefing.py') }}
+          restore-keys: |
+            f1-data-cache-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Test free API access
+        run: |
+          python - <<'PY'
+          import requests
+          for url in [
+              "https://api.jolpi.ca/ergast/f1/current.json",
+              "https://api.open-meteo.com/v1/forecast?latitude=25.9581&longitude=-80.2389&current=temperature_2m"
+          ]:
+              r = requests.get(url, timeout=25)
+              print(url, r.status_code, r.text[:120].replace("\n", " "))
+              r.raise_for_status()
+          PY
+
+      - name: Generate briefing and retrain if needed
+        env:
+          F1_ICS_URL: ${{ secrets.F1_ICS_URL }}
+          EMAIL_ENABLED: ${{ github.event.inputs.send_email || 'true' }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+          USER_TIMEZONE: "Asia/Kolkata"
+          LOOKAHEAD_DAYS: ${{ github.event.inputs.lookahead_days || '90' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          FORCE_RETRAIN: ${{ github.event.inputs.force_retrain || 'false' }}
+          ML_START_YEAR: "2018"
+          MODEL_DIR: "models/saved_models"
+          HTTP_CACHE_DIR: "data_cache/http"
+          FASTF1_CACHE_DIR: "fastf1_cache"
+        run: python f1_briefing.py
+
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f1-briefing-output
+          path: |
+            briefings/**
+            data_cache/latest-model-debug.json
+            models/saved_models/**
+          if-no-files-found: ignore
