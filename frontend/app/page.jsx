@@ -406,7 +406,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["gilles", "villeneuve", "canadian", "canada", "montreal", "circuit gilles villeneuve"],
     name: "Circuit Gilles Villeneuve",
     officialPage: "https://www.formula1.com/en/racing/2026/canada",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackmontrealdetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackmontrealdetailed.webp",
     raceLaps: 70,
     sprintLaps: null,
     lengthKm: 4.361,
@@ -416,7 +416,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["interlagos", "sao paulo", "são paulo", "brazil", "brasil", "autodromo jose carlos pace", "autódromo josé carlos pace"],
     name: "Autódromo José Carlos Pace",
     officialPage: "https://www.formula1.com/en/racing/2026/brazil",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackinterlagosdetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackinterlagosdetailed.webp",
     raceLaps: 71,
     sprintLaps: null,
     lengthKm: 4.309,
@@ -426,7 +426,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["monaco", "monte carlo", "monte-carlo"],
     name: "Circuit de Monaco",
     officialPage: "https://www.formula1.com/en/racing/2026/monaco",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackmonacodetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackmonacodetailed.webp",
     raceLaps: 78,
     sprintLaps: null,
     lengthKm: 3.337,
@@ -436,7 +436,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["silverstone", "british", "great britain", "uk", "united kingdom"],
     name: "Silverstone Circuit",
     officialPage: "https://www.formula1.com/en/racing/2026/great-britain",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026tracksilverstonedetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026tracksilverstonedetailed.webp",
     raceLaps: 52,
     sprintLaps: null,
     lengthKm: 5.891,
@@ -446,7 +446,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["monza", "italian", "italy", "autodromo nazionale monza"],
     name: "Autodromo Nazionale Monza",
     officialPage: "https://www.formula1.com/en/racing/2026/italy",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackmonzadetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackmonzadetailed.webp",
     raceLaps: 53,
     sprintLaps: null,
     lengthKm: 5.793,
@@ -456,7 +456,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["spa", "belgian", "belgium", "spa-francorchamps", "francorchamps"],
     name: "Circuit de Spa-Francorchamps",
     officialPage: "https://www.formula1.com/en/racing/2026/belgium",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackspadetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackspadetailed.webp",
     raceLaps: 44,
     sprintLaps: null,
     lengthKm: 7.004,
@@ -466,7 +466,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["suzuka", "japanese", "japan"],
     name: "Suzuka Circuit",
     officialPage: "https://www.formula1.com/en/racing/2026/japan",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026tracksuzukadetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026tracksuzukadetailed.webp",
     raceLaps: 53,
     sprintLaps: null,
     lengthKm: 5.807,
@@ -476,7 +476,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["yas marina", "abu dhabi", "united arab emirates", "uae"],
     name: "Yas Marina Circuit",
     officialPage: "https://www.formula1.com/en/racing/2026/abu-dhabi",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackabudhabidetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackabudhabidetailed.webp",
     raceLaps: 58,
     sprintLaps: null,
     lengthKm: 5.281,
@@ -486,7 +486,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["miami", "miami international"],
     name: "Miami International Autodrome",
     officialPage: "https://www.formula1.com/en/racing/2026/miami",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackmiamidetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackmiamidetailed.webp",
     raceLaps: 57,
     sprintLaps: null,
     lengthKm: 5.412,
@@ -496,7 +496,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["barcelona", "catalunya", "spain", "spanish", "barcelona-catalunya"],
     name: "Circuit de Barcelona-Catalunya",
     officialPage: "https://www.formula1.com/en/racing/2026/spain",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackbarcelonadetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackbarcelonadetailed.webp",
     raceLaps: 66,
     sprintLaps: null,
     lengthKm: 4.657,
@@ -506,7 +506,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["spielberg", "austrian", "austria", "red bull ring"],
     name: "Red Bull Ring",
     officialPage: "https://www.formula1.com/en/racing/2026/austria",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackaustriadetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackaustriadetailed.webp",
     raceLaps: 71,
     sprintLaps: null,
     lengthKm: 4.318,
@@ -516,7 +516,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["hungaroring", "hungarian", "hungary"],
     name: "Hungaroring",
     officialPage: "https://www.formula1.com/en/racing/2026/hungary",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackhungarydetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackhungarydetailed.webp",
     raceLaps: 70,
     sprintLaps: null,
     lengthKm: 4.381,
@@ -526,7 +526,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["zandvoort", "dutch", "netherlands"],
     name: "Circuit Zandvoort",
     officialPage: "https://www.formula1.com/en/racing/2026/netherlands",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackzandvoortdetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackzandvoortdetailed.webp",
     raceLaps: 72,
     sprintLaps: null,
     lengthKm: 4.259,
@@ -536,7 +536,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["singapore", "marina bay"],
     name: "Marina Bay Street Circuit",
     officialPage: "https://www.formula1.com/en/racing/2026/singapore",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026tracksingaporedetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026tracksingaporedetailed.webp",
     raceLaps: 62,
     sprintLaps: null,
     lengthKm: 4.94,
@@ -546,7 +546,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["las vegas", "vegas"],
     name: "Las Vegas Strip Circuit",
     officialPage: "https://www.formula1.com/en/racing/2026/las-vegas",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026tracklasvegasdetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026tracklasvegasdetailed.webp",
     raceLaps: 50,
     sprintLaps: null,
     lengthKm: 6.201,
@@ -556,7 +556,7 @@ const OFFICIAL_CIRCUIT_REGISTRY = {
     aliases: ["qatar", "lusail", "losail"],
     name: "Lusail International Circuit",
     officialPage: "https://www.formula1.com/en/racing/2026/qatar",
-    image: "https://media.formula1.com/image/upload/c_fit%2Ch_704/q_auto/v1740000001/common/f1/2026/track/2026trackqatardetailed.webp",
+    image: "https://media.formula1.com/image/upload/c_fit%2Cw_900%2Ch_520/q_auto/v1740000001/common/f1/2026/track/2026trackqatardetailed.webp",
     raceLaps: 57,
     sprintLaps: null,
     lengthKm: 5.419,
@@ -641,7 +641,10 @@ function OfficialCircuitImage({ circuit }) {
 
   if (!circuit || !circuit.image || failed) {
     return (
-      <div className="grid min-h-[330px] place-items-center rounded-[1.7rem] bg-black/40">
+      <div
+        className="grid min-h-[300px] place-items-center rounded-[1.7rem] bg-black/40"
+        style={{ width: "100%", maxWidth: "100%", overflow: "hidden" }}
+      >
         <div className="text-center">
           <Map className="mx-auto mb-4 text-zinc-500" size={54} />
           <p className="text-sm text-zinc-400">
@@ -653,14 +656,33 @@ function OfficialCircuitImage({ circuit }) {
   }
 
   return (
-    <div className="relative overflow-hidden rounded-[1.7rem] border border-white/10 bg-black/70 p-4">
-      <div className="grid h-[360px] place-items-center overflow-hidden rounded-[1.25rem] bg-black/80">
+    <div
+      className="relative min-w-0 overflow-hidden rounded-[1.7rem] border border-white/10 bg-black/70 p-3"
+      style={{ width: "100%", maxWidth: "100%", overflow: "hidden" }}
+    >
+      <div
+        className="grid place-items-center overflow-hidden rounded-[1.25rem] bg-black/80"
+        style={{
+          width: "100%",
+          maxWidth: "100%",
+          height: "clamp(240px, 32vw, 380px)",
+          overflow: "hidden",
+        }}
+      >
         <img
           src={circuit.image}
           alt={`${circuit.name} official Formula 1 circuit map`}
-          className="h-full w-full object-contain object-center"
           loading="lazy"
           onError={() => setFailed(true)}
+          style={{
+            display: "block",
+            width: "100%",
+            height: "100%",
+            maxWidth: "100%",
+            maxHeight: "100%",
+            objectFit: "contain",
+            objectPosition: "center",
+          }}
         />
       </div>
     </div>
@@ -672,7 +694,7 @@ function CircuitIntelCard({ profile, weather, selectedTarget }) {
   const lapInfo = sessionLaps(profile, circuit, selectedTarget);
 
   return (
-    <section className="rounded-[2rem] border border-white/10 bg-[#111113] p-6 shadow-2xl">
+    <section id="circuit" className="min-w-0 overflow-hidden rounded-[2rem] border border-white/10 bg-[#111113] p-6 shadow-2xl">
       <div className="mb-5 flex items-center justify-between gap-4">
         <div>
           <h2 className="text-3xl font-black tracking-tight text-[#f5efe7]">
@@ -992,7 +1014,7 @@ export default function Home() {
 
       <ModelSignalMarquee predictions={predictions} profile={profile} modelMetrics={modelMetrics} />
 
-      <section className="layout monaco-grid-main" id="predictions">
+      <section className="layout monaco-grid-main min-w-0 overflow-hidden" id="predictions">
         <article className="card prediction-section">
           <div className="section-head">
             <h2>Prediction Standings</h2>
@@ -1001,7 +1023,7 @@ export default function Home() {
           <PredictionList predictions={predictions} />
         </article>
 
-        <aside className="stack">
+        <aside className="stack min-w-0 overflow-hidden">
           <CircuitIntelCard profile={profile} weather={weather} selectedTarget={selectedTarget} />
 
           <article className="card">
