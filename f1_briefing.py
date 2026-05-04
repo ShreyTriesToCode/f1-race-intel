@@ -594,27 +594,32 @@ def classify_output_target_event(event):
     """
     Output target classifier.
 
-    Practice and qualifying are input signals only. They are never direct output targets.
-    Sprint Qualifying / Sprint Shootout are also input signals, not output targets.
+    Practice, Qualifying, Sprint Qualifying, Sprint Shootout, and Sprint Qualification
+    are input signals only. They are never direct output targets.
+
+    Only two target types are allowed in public output:
+    - sprint race
+    - final race
     """
     title = str(event.get("title", "")).lower()
     description = str(event.get("description", "")).lower()
     text_value = f"{title} {description}"
 
-    if any(k in text_value for k in ["practice", "fp1", "fp2", "fp3"]):
+    input_only_markers = [
+        "practice", "fp1", "fp2", "fp3",
+        "qualifying", "qualification", "sprint qualifying",
+        "sprint qualification", "sprint shootout", "shootout",
+        "sq"
+    ]
+
+    if any(k in text_value for k in input_only_markers):
         return "input_only"
 
-    if any(k in text_value for k in ["sprint qualifying", "sprint shootout", "sq"]):
-        return "input_only"
-
-    if "qualifying" in text_value:
-        return "input_only"
-
-    # Sprint race, not sprint qualifying.
+    # Sprint race, not sprint qualifying/qualification.
     if "sprint" in text_value:
         return "sprint"
 
-    # Race, not practice/qualifying/sprint.
+    # Final race. A plain Grand Prix calendar event usually means Race.
     if "race" in text_value or "grand prix" in text_value or " gp" in text_value:
         return "race"
 
@@ -1195,8 +1200,12 @@ def should_retrain(force=False):
 
 def train_ml_model(force=False):
     if not should_retrain(force):
-        print("ML model is current. Skipping retrain.")
-        return load_ml_bundle()
+        print("ML model is current. Checking saved bundle.")
+        existing_bundle = load_ml_bundle()
+        if existing_bundle:
+            print("Saved ML bundle loaded successfully. Skipping retrain.")
+            return existing_bundle
+        print("Saved ML bundle could not be loaded. Retraining with current dependency versions.")
 
     print("Training full-data ML model from cached/backfilled historical data.")
     current_year = now_local().year
