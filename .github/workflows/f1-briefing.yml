@@ -30,6 +30,10 @@ on:
         description: "Hours before matched event when email and issue notifications are allowed"
         required: false
         default: "8"
+      output_mode:
+        description: "Output mode. auto = manual weekend, scheduled today. weekend = Sprint + Race weekend. today = only today's Sprint/Race. next = next Sprint/Race."
+        required: false
+        default: "auto"
 
 permissions:
   contents: write
@@ -86,6 +90,7 @@ jobs:
           FINAL_RESULTS_DELAY_HOURS: "8"
           NOTIFICATION_WINDOW_HOURS: ${{ github.event.inputs.notification_window_hours || '8' }}
           FORCE_NOTIFY: ${{ github.event.inputs.force_notify || 'false' }}
+          OUTPUT_MODE: ${{ github.event.inputs.output_mode || 'auto' }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           FORCE_RETRAIN: ${{ github.event.inputs.force_retrain || 'false' }}

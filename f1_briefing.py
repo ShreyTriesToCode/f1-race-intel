@@ -42,6 +42,8 @@ LOOKAHEAD_DAYS = int(os.getenv("LOOKAHEAD_DAYS", "90"))
 FINAL_RESULTS_DELAY_HOURS = int(os.getenv("FINAL_RESULTS_DELAY_HOURS", "8"))
 NOTIFICATION_WINDOW_HOURS = int(os.getenv("NOTIFICATION_WINDOW_HOURS", "8"))
 FORCE_NOTIFY = os.getenv("FORCE_NOTIFY", "false").lower() == "true"
+OUTPUT_MODE = os.getenv("OUTPUT_MODE", "auto").lower().strip()
+GITHUB_EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "").lower().strip()
 
 ML_START_YEAR = int(os.getenv("ML_START_YEAR", "2018"))
 USE_FULL_HISTORICAL_DATA = os.getenv("USE_FULL_HISTORICAL_DATA", "true").lower() == "true"
@@ -546,27 +548,207 @@ def normalize_datetime(value):
 
 
 def find_next_calendar_event(calendar):
+    events = get_f1_calendar_events(calendar)
+    return events[0] if events else None
+
+
+def get_f1_calendar_events(calendar):
     now = now_local()
     max_date = now + timedelta(days=LOOKAHEAD_DAYS)
     events = []
+
     for component in calendar.walk():
         if component.name != "VEVENT":
             continue
+
         title = str(component.get("summary", ""))
         location = str(component.get("location", ""))
         description = str(component.get("description", ""))
         start_raw = component.get("dtstart")
         end_raw = component.get("dtend")
+
         if not start_raw:
             continue
+
         start = normalize_datetime(start_raw.dt)
         end = normalize_datetime(end_raw.dt) if end_raw else None
-        text = f"{title} {location} {description}".lower()
-        if any(k in text for k in ["formula 1", "f1", "grand prix", "qualifying", "practice", "sprint", "race"]):
+        text_value = f"{title} {location} {description}".lower()
+
+        if any(k in text_value for k in ["formula 1", "f1", "grand prix", "gp", "sprint", "race", "qualifying", "practice"]):
             if now <= start <= max_date:
-                events.append({"title": title, "location": location, "description": description, "start": start, "end": end})
+                event = {
+                    "title": title,
+                    "location": location,
+                    "description": description,
+                    "start": start,
+                    "end": end,
+                }
+                event["target_type"] = classify_output_target_event(event)
+                events.append(event)
+
     events.sort(key=lambda item: item["start"])
-    return events[0] if events else None
+    return events
+
+
+def classify_output_target_event(event):
+    """
+    Output target classifier.
+
+    Practice and qualifying are input signals only. They are never direct output targets.
+    Sprint Qualifying / Sprint Shootout are also input signals, not output targets.
+    """
+    title = str(event.get("title", "")).lower()
+    description = str(event.get("description", "")).lower()
+    text_value = f"{title} {description}"
+
+    if any(k in text_value for k in ["practice", "fp1", "fp2", "fp3"]):
+        return "input_only"
+
+    if any(k in text_value for k in ["sprint qualifying", "sprint shootout", "sq"]):
+        return "input_only"
+
+    if "qualifying" in text_value:
+        return "input_only"
+
+    # Sprint race, not sprint qualifying.
+    if "sprint" in text_value:
+        return "sprint"
+
+    # Race, not practice/qualifying/sprint.
+    if "race" in text_value or "grand prix" in text_value or " gp" in text_value:
+        return "race"
+
+    return "input_only"
+
+
+def is_output_target_event(event):
+    return classify_output_target_event(event) in {"sprint", "race"}
+
+
+def selected_output_mode():
+    """
+    workflow_dispatch/manual run: weekend output by default.
+    schedule/automatic run: today-only output by default.
+    Local runs default to weekend unless OUTPUT_MODE is explicitly set.
+    """
+    if OUTPUT_MODE in {"weekend", "today", "next"}:
+        return OUTPUT_MODE
+
+    if GITHUB_EVENT_NAME == "schedule":
+        return "today"
+
+    if GITHUB_EVENT_NAME == "workflow_dispatch":
+        return "weekend"
+
+    return "weekend"
+
+
+def event_weekend_window(anchor_event):
+    start = anchor_event["start"]
+    # Covers Thu-Mon around normal and sprint weekends, while avoiding pulling the next GP.
+    return start - timedelta(days=4), start + timedelta(days=2)
+
+
+def events_match_same_race(a, b):
+    """
+    Uses Jolpica matching to group Sprint and Race from the same GP.
+    Falls back to title token overlap if one match fails.
+    """
+    try:
+        race_a = find_best_race(a)
+        race_b = find_best_race(b)
+        if race_a and race_b:
+            return str(race_a.get("season")) == str(race_b.get("season")) and str(race_a.get("round")) == str(race_b.get("round"))
+    except Exception:
+        pass
+
+    tokens_a = set(tokenize(a.get("title", "")))
+    tokens_b = set(tokenize(b.get("title", "")))
+    return len(tokens_a & tokens_b) >= 1
+
+
+def select_output_events(calendar):
+    """
+    Returns Sprint/Race output targets only.
+
+    Manual/weekend mode:
+      Return Sprint and Race for the next race weekend in one briefing.
+      If there is no Sprint event, return Race only.
+
+    Scheduled/today mode:
+      Return only today's Sprint or Race event(s).
+      Practice and Qualifying are ignored as output targets.
+
+    Next mode:
+      Return the next single Sprint/Race target.
+    """
+    mode = selected_output_mode()
+    events = get_f1_calendar_events(calendar)
+    targets = [event for event in events if is_output_target_event(event)]
+    now = now_local()
+
+    if not targets:
+        return mode, []
+
+    if mode == "today":
+        today_targets = [
+            event for event in targets
+            if event["start"].astimezone(USER_TIMEZONE).date() == now.date()
+        ]
+        today_targets.sort(key=lambda item: (0 if item["target_type"] == "sprint" else 1, item["start"]))
+        return mode, today_targets
+
+    if mode == "next":
+        return mode, [targets[0]]
+
+    # Weekend mode.
+    next_race = next((event for event in targets if event["target_type"] == "race"), None)
+    anchor_event = next_race or targets[0]
+    start_window, end_window = event_weekend_window(anchor_event)
+
+    weekend_targets = [
+        event for event in targets
+        if start_window <= event["start"] <= end_window and events_match_same_race(event, anchor_event)
+    ]
+
+    # Always order Sprint before Race in the combined weekend output.
+    weekend_targets.sort(key=lambda item: (0 if item["target_type"] == "sprint" else 1, item["start"]))
+
+    # Keep at most one sprint and one race target.
+    deduped = []
+    seen_types = set()
+    for event in weekend_targets:
+        target_type = event["target_type"]
+        if target_type not in seen_types:
+            deduped.append(event)
+            seen_types.add(target_type)
+
+    return mode, deduped
+
+
+def make_report_event(events, mode):
+    if not events:
+        return None
+
+    first = events[0]
+    race = find_best_race(first)
+    race_name = race.get("raceName") if race else first.get("title", "F1")
+
+    if mode == "weekend" and len(events) > 1:
+        title = f"F1 Weekend Briefing: {race_name} Sprint + Race"
+    elif mode == "weekend":
+        title = f"F1 Weekend Briefing: {race_name}"
+    else:
+        title = f"F1 Briefing: {first.get('title')}"
+
+    return {
+        "title": title,
+        "location": first.get("location", ""),
+        "description": " | ".join(event.get("title", "") for event in events),
+        "start": min(event["start"] for event in events),
+        "end": max((event.get("end") or event["start"]) for event in events),
+        "target_type": "weekend" if len(events) > 1 else first.get("target_type"),
+    }
 
 
 def tokenize(text):
@@ -2856,13 +3038,56 @@ def notification_status(event):
     }
 
 
-def maybe_send_outputs(title, briefing, event):
+def notification_status_for_events(events):
+    if FORCE_NOTIFY:
+        return {
+            "allowed": True,
+            "reason": "FORCE_NOTIFY=true",
+            "hours_until_event": None,
+            "matched_event": None,
+        }
+
+    if not events:
+        return {
+            "allowed": False,
+            "reason": "No Sprint/Race output target was selected.",
+            "hours_until_event": None,
+            "matched_event": None,
+        }
+
+    statuses = []
+    for event in events:
+        status = notification_status(event)
+        status["matched_event"] = event.get("title")
+        statuses.append(status)
+
+    allowed = [status for status in statuses if status.get("allowed")]
+    if allowed:
+        allowed.sort(key=lambda item: item.get("hours_until_event") if item.get("hours_until_event") is not None else 9999)
+        return allowed[0]
+
+    future_statuses = [status for status in statuses if status.get("hours_until_event") is not None and status.get("hours_until_event") >= 0]
+    if future_statuses:
+        future_statuses.sort(key=lambda item: item.get("hours_until_event"))
+        status = future_statuses[0]
+        return {
+            "allowed": False,
+            "reason": f"Nearest Sprint/Race target is more than {NOTIFICATION_WINDOW_HOURS} hours away.",
+            "hours_until_event": status.get("hours_until_event"),
+            "matched_event": status.get("matched_event"),
+        }
+
+    return statuses[0]
+
+
+def maybe_send_outputs(title, briefing, event_or_events):
     """
     Always generate and commit dashboard data.
     Only send email and update GitHub issue inside notification window.
     """
-    status = notification_status(event)
-    print(f"Notification gate: allowed={status['allowed']} reason={status['reason']} hours_until_event={status['hours_until_event']}")
+    events = event_or_events if isinstance(event_or_events, list) else [event_or_events]
+    status = notification_status_for_events(events)
+    print(f"Notification gate: allowed={status['allowed']} reason={status['reason']} hours_until_event={status['hours_until_event']} matched_event={status.get('matched_event')}")
 
     if not status["allowed"]:
         return status
@@ -2873,138 +3098,109 @@ def maybe_send_outputs(title, briefing, event):
 
 
 def generate_briefing(event, race, profile, weather, top10_text, prediction_model, team_fit, upgrade_context, regulation_context, calendar_context):
-    title = f"F1 Briefing: {event['title']}"
+    """
+    Clean public briefing.
+
+    The full model still runs internally. This output is deliberately short so
+    email, GitHub Issue, Markdown, and the website stay readable.
+    """
+    target_type = prediction_model.get("output_target_type", classify_output_target_event(event))
+    title_prefix = "Sprint" if target_type == "sprint" else "Race" if target_type == "race" else "F1"
+    title = f"F1 {title_prefix} Briefing: {event['title']}"
     start_str = event["start"].strftime("%A, %d %B %Y, %I:%M %p %Z")
-    reasons = profile["dynamic_reasons"]
-    metrics = profile["dynamic_track_metrics"]
-    weights_text = "\n".join(f"- {k.replace('_', ' ')}: {v * 100:.1f}%" for k, v in prediction_model.get("weights", {}).items())
-    team_text = "\n".join([f"- {idx + 1}. {team}" for idx, team in enumerate(team_fit)]) if team_fit else "- Unavailable"
+
+    top_prediction = top10_text if top10_text else "Prediction unavailable until enough data is cached."
+
+    team_text = "\n".join(
+        f"{idx + 1}. {team}" for idx, team in enumerate((team_fit or [])[:5])
+    ) if team_fit else "Unavailable"
+
+    upgrade_scores = upgrade_context.get("team_scores") or {}
+    upgrade_traits = upgrade_context.get("team_traits") or {}
     upgrade_lines = []
-    for team, score in sorted((upgrade_context.get("team_scores") or {}).items(), key=lambda item: item[1], reverse=True):
-        traits = upgrade_context.get("team_traits", {}).get(team, {})
-        upgrade_lines.append(f"- {team}: impact {score:.1f}/100, traits {traits}")
+    for team, score in sorted(upgrade_scores.items(), key=lambda item: item[1], reverse=True)[:3]:
+        traits = upgrade_traits.get(team, {})
+        useful_traits = [trait.replace("_", " ") for trait, value in traits.items() if value]
+        trait_text = ", ".join(useful_traits[:3]) if useful_traits else "no clear trait match"
+        upgrade_lines.append(f"- {team}: {score:.1f}/100, {trait_text}")
     if not upgrade_lines:
-        upgrade_lines = [f"- {upgrade_context.get('provider_status', 'No official upgrade data found for this event.')}"]
-    upgrade_text = "\n".join(upgrade_lines)
-    regulation_text = "\n".join([f"- {note}" for note in regulation_context.get("notes", [])]) or "- No special regulation-era modifier beyond normal car and track traits."
-    calendar_text = f"- Status: {calendar_context.get('status')}\n- Official URL: {calendar_context.get('official_url')}\n- Race name seen: {calendar_context.get('race_name_seen')}"
-    checklist_text = "\n".join([f"- {item}: included" for item in PROMPT_REQUIREMENT_CHECKLIST])
+        upgrade_lines = ["- No trusted upgrade-package signal found for this event."]
+
+    weights = prediction_model.get("weights", {}) or {}
+    top_weights = sorted(weights.items(), key=lambda item: item[1], reverse=True)[:5]
+    model_lines = [
+        f"- {key.replace('_', ' ')}: {value * 100:.1f}%"
+        for key, value in top_weights
+    ] or ["- Weight audit unavailable"]
+
+    available = prediction_model.get("available_components", {}) or {}
+    source_lines = [
+        f"- Stage: {prediction_model.get('prediction_stage_label', 'Unknown')}",
+        f"- ML model: {'loaded' if prediction_model.get('ml_model_loaded') else 'fallback mode'}",
+        f"- OpenF1: {available.get('openf1_provider_status', available.get('openf1_status', 'fallback if unavailable'))}",
+        f"- FastF1 sessions: {available.get('fastf1_sessions_loaded', [])}",
+        f"- Calendar check: {calendar_context.get('status', 'not checked')}",
+    ]
+
+    regulation_notes = regulation_context.get("notes", []) or []
+    regulation_text = "\n".join(f"- {note}" for note in regulation_notes[:2]) if regulation_notes else "- No special regulation modifier beyond normal model traits."
 
     briefing = f"""# {title}
 
 Generated: {now_local().strftime("%A, %d %B %Y, %I:%M %p %Z")}
 
-## 1. Grand Prix overview
+## Event
 
-- Event: {event['title']}
-- Start time: {start_str}
-- Calendar location: {event['location'] or 'Not provided'}
-- Jolpica race: {profile['race_name']}
+- Target: {title_prefix}
+- Start: {start_str}
 - Circuit: {profile['circuit']}
-- City and country: {profile['city']}, {profile['country']}
-- Track type: {profile['track_type']}
-- Overtaking level: {profile['overtaking']}
-- Safety car likelihood: {profile['safety_car']}
+- Location: {profile['city']}, {profile['country']}
 
-## 2. Weather briefing
+## Prediction
 
-- Weather source: {weather['source']}
-- Air temperature: {weather['temperature']}
-- Track temperature: {weather['track_temperature']}
-- Rain: {weather['rain']}
-- Humidity: {weather['humidity']}
-- Wind: {weather['wind']}
-- Wind gust: {weather.get('wind_gust', 'Unavailable')}
-- Cloud cover: {weather.get('cloud_cover', 'Unavailable')}
-- Strategy impact: {weather['impact']}
+{top_prediction}
 
-## 3. Dynamic track and car trait model
+## Track and weather
 
-- Dominance: {profile['dominance']}
-- Car trait: {profile['car_trait']}
-- Speed profile: {profile['speed_profile']} ({reasons['speed_profile']})
-- Tyre stress: {profile['tyre_stress']} ({reasons['tyre_stress']})
-- Overtaking: {profile['overtaking']} ({reasons['overtaking']})
-- Safety car: {profile['safety_car']} ({reasons['safety_car']})
-- Strategy bias: {profile['strategy_bias']}
+- Key car trait: {profile['car_trait']}
+- Track profile: {profile['speed_profile']}
+- Overtaking: {profile['overtaking']}
+- Tyre stress: {profile['tyre_stress']}
+- Safety car/DNF risk proxy: {profile['safety_car']}
+- Weather: {weather['temperature']}, rain {weather['rain']}, wind {weather['wind']}
+- Weather impact: {weather['impact']}
 
-## 3A. Data source audit
+## Strategy
 
-- Source: {profile['dynamic_track_source']['source']}
-- Historical races sampled: {metrics['historical_races_sampled']}
-- Average overtake delta: {metrics['average_overtake_delta']}
-- Average stops per driver: {metrics['average_stops_per_driver']}
-- DNF rate: {metrics['dnf_rate']}
-- Lap consistency: {metrics['lap_consistency']}
-- Full-data backfill used this run: {metrics['backfill_used_this_run']}
-- Prediction stage: {prediction_model.get('prediction_stage_label', prediction_model.get('prediction_stage', 'Unknown'))}
+- Baseline: {profile['strategy_bias']}
+- Pit window: {pit_window_from_profile(profile, weather)}
+- Main risk: tyre drop-off, safety-car timing, traffic after pit stop, and weather crossover.
 
-## 4. Team advantage estimate
+## Team fit
 
 {team_text}
 
-## 5. Tyre strategy
+## Upgrade impact
 
-- Baseline strategy: {profile['strategy_bias']}
-- Safest dry approach: conservative one-stop if degradation data stays controlled.
-- Aggressive dry approach: early undercut or two-stop if tyre stress rises.
-- Wet-weather adjustment: if rain probability rises, delay fixed dry-compound plans.
-- Pit window: {pit_window_from_profile(profile, weather)}
+{chr(10).join(upgrade_lines)}
 
-## 6. Pit stop strategy
+## Regulation context
 
-- Likely number of stops: inferred from full cached historical pit-stop data.
-- Safety car response: pit if the loss is lower and track position can be retained.
-- Virtual safety car response: pit if tyre age is near the planned window.
-- Avoid pitting into traffic, especially where overtaking is low.
-
-## 7. Setup direction
-
-{profile['setup']}
-
-## 7A. Official upgrade package impact
-
-Upgrade data is taken first from official FIA/F1 trusted pages when reachable. The model classifies each package into traits, then only boosts a team if the upgrade matches the circuit and weather traits.
-
-{upgrade_text}
-
-## 7B. Regulation-era context
-
-Regulation era: {regulation_context.get('era')}
+Era: {regulation_context.get('era')}
 
 {regulation_text}
 
-## 7C. Calendar resilience check
+## Main model signals
 
-{calendar_text}
+{chr(10).join(model_lines)}
 
-## 8. Potential top 10 prediction
+## Source status
 
-Prediction status: dynamic but not guaranteed. This model uses Mintlify-style F1 feature groups plus your own full cached free-data system: grid position, driver skills, constructor and current-season car performance, OpenF1 telemetry/session data when the free historical API works, previous results, same-circuit results, official upgrade packages, F1 regulation-era context, same-circuit results, track traits, weather traits, tyre degradation proxy, pit-stop data, lap pace, sprint data, reliability, and FastF1 signals where available.
-
-{top10_text if top10_text else "Unavailable until enough data is cached."}
-
-## 8A. Prediction model weights
-
-{weights_text}
-
-## 8B. Prompt requirement verification
-
-{checklist_text}
-
-## 9. What to watch
-
-- Whether a team’s upgrade package matches this circuit instead of only sounding large in news copy.
-- Whether current regulations reward the same traits as the circuit: active aero, energy deployment, drag, downforce, braking, and tyre control.
-- Qualifying and grid position if this is a low-overtaking circuit.
-- Tyre degradation and pit timing if cached history shows high pit-stop frequency.
-- Weather changes if rain, wind, heat, or cloud cover moves before race start.
-- Team-car fit against the circuit trait: straight-line, downforce, traction, braking, or tyre management.
-- Whether FastF1 session data confirms or contradicts the historical model.
+{chr(10).join(source_lines)}
 
 ---
 
-Generated by the F1 Race Intel full-data hybrid model.
+Predictions are estimates, not guaranteed race results.
 """
     return title, briefing
 
@@ -3178,28 +3374,29 @@ def write_skip_outputs(subject, details):
     safe_step("Email status", send_email, subject, details)
 
 
-def run(force_retrain=False):
-    ensure_dirs()
-    require_env_vars()
+def build_single_output_payload(event, bundle):
+    """
+    Builds one compact output payload for a Sprint or Race target.
 
-    bundle = safe_step("Train/load full-data ML model", train_ml_model, force_retrain)
-    if not bundle:
-        bundle = load_ml_bundle()
-
-    calendar = fetch_ics_calendar()
-    event = find_next_calendar_event(calendar)
-    if not event:
-        details = f"No F1 event found in the next {LOOKAHEAD_DAYS} days."
-        print(details)
-        write_skip_outputs("F1 Race Intel: Skipped", details)
-        return
+    Practice, qualifying, sprint qualifying, FastF1, OpenF1, weather, upgrades,
+    and historical data may be used as inputs, but only Sprint/Race targets are
+    exposed as output.
+    """
+    target_type = classify_output_target_event(event)
+    if target_type not in {"sprint", "race"}:
+        return {
+            "ok": False,
+            "event": event,
+            "error": f"Skipping non-output event: {event.get('title')}",
+        }
 
     race = find_best_race(event)
     if not race:
-        details = f"Found calendar event but could not match Jolpica race.\n\nEvent: {event['title']}\nStart: {event['start']}\nLocation: {event.get('location')}"
-        print(details)
-        write_skip_outputs("F1 Race Intel: Race Not Matched", details)
-        return
+        return {
+            "ok": False,
+            "event": event,
+            "error": f"Could not match Jolpica race for {event.get('title')}",
+        }
 
     season = safe_int(race.get("season")) or event["start"].year
     round_no = race.get("round")
@@ -3212,15 +3409,18 @@ def run(force_retrain=False):
         race=race,
         training_mode=False,
     )
+
     driver_standings, constructor_standings, standings_context = fetch_latest_available_standings_with_fallback(season)
     last_results = fetch_last_results(season)
     historical_records = fetch_historical_same_circuit(race, years_back=5)
 
     if not driver_standings:
-        details = f"Matched {race.get('raceName')} but driver standings are unavailable."
-        print(details)
-        write_skip_outputs("F1 Race Intel: Driver Standings Missing", details)
-        return
+        return {
+            "ok": False,
+            "event": event,
+            "race": race,
+            "error": f"Matched {race.get('raceName')} but driver standings are unavailable.",
+        }
 
     drivers = standings_to_drivers(driver_standings)
     weather = fetch_weather_for_race(race, event["start"])
@@ -3231,6 +3431,14 @@ def run(force_retrain=False):
     calendar_context = official_calendar_context_for_season(season, race)
 
     stage, stage_label = get_prediction_stage(current_round_data, event["start"])
+
+    # Make the target explicit. The same round data may contain qualifying or sprint results,
+    # but output is restricted to sprint/race.
+    if target_type == "sprint":
+        stage_label = f"Sprint prediction, {stage_label}"
+    elif target_type == "race":
+        stage_label = f"Race prediction, {stage_label}"
+
     ml_outputs, ml_debug = ml_predict_probabilities(drivers, race, current_round_data, bundle)
     openf1_scores = safe_step("OpenF1 enhancement", openf1_enhancement_scores, race, drivers) or {"provider_status": "failed"}
     fastf1_scores = safe_step("FastF1 enhancement", fastf1_enhancement_scores, season, round_no) or {"sessions_loaded": []}
@@ -3253,7 +3461,9 @@ def run(force_retrain=False):
         current_round=round_no,
         stage=stage,
     )
+
     prediction_model["prediction_stage_label"] = stage_label
+    prediction_model["output_target_type"] = target_type
     prediction_model["ml_model_loaded"] = bool(bundle)
     prediction_model["ml_model_meta"] = {
         "trained_at": bundle.get("trained_at") if bundle else None,
@@ -3262,34 +3472,195 @@ def run(force_retrain=False):
     }
 
     team_fit = get_dynamic_team_fit(top10, constructor_standings)
-    title, briefing = generate_briefing(event, race, profile, weather, top10_text, prediction_model, team_fit, upgrade_context, regulation_context, calendar_context)
+    title, briefing = generate_briefing(
+        event,
+        race,
+        profile,
+        weather,
+        top10_text,
+        prediction_model,
+        team_fit,
+        upgrade_context,
+        regulation_context,
+        calendar_context,
+    )
 
-    markdown_path = save_markdown(event, briefing)
-    index_path = update_index(event, race, profile, weather, markdown_path, title, top10, team_fit, prediction_model, upgrade_context, regulation_context, calendar_context)
-    status_path = save_run_status("Success", f"Generated full-data hybrid F1 briefing.\n\nTitle: {title}\nBackfill used this run: {BACKFILL_BUDGET.used}")
-    debug_path = save_debug({
-        "generated_at": now_local().isoformat(),
+    return {
+        "ok": True,
         "event": event,
         "race": race,
-        "prediction_model": prediction_model,
-        "top10": top10,
+        "season": season,
+        "round_no": round_no,
+        "target_type": target_type,
+        "title": title,
+        "briefing": briefing,
+        "profile": profile,
         "weather": weather,
         "historical_weather": historical_weather,
-        "track_profile": profile,
+        "top10_text": top10_text,
+        "top10": top10,
+        "team_fit": team_fit,
+        "prediction_model": prediction_model,
         "ml_debug": ml_debug,
         "openf1_scores": openf1_scores,
+        "fastf1_scores": fastf1_scores,
         "upgrade_context": upgrade_context,
         "regulation_context": regulation_context,
-        "official_calendar_context": calendar_context,
+        "calendar_context": calendar_context,
         "standings_context": standings_context,
-        "prompt_requirement_checklist": PROMPT_REQUIREMENT_CHECKLIST,
-        "fastf1_scores": fastf1_scores,
+    }
+
+
+def strip_briefing_heading(briefing):
+    lines = str(briefing or "").splitlines()
+    if lines and lines[0].startswith("# "):
+        lines = lines[1:]
+    # Remove duplicate generated line from subsections; combined report already has one.
+    cleaned = []
+    for line in lines:
+        if line.startswith("Generated:"):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+
+def combine_weekend_briefings(report_event, payloads, mode):
+    if not payloads:
+        return "F1 Race Intel: No Sprint/Race output target found", ""
+
+    if len(payloads) == 1:
+        return payloads[0]["title"], payloads[0]["briefing"]
+
+    targets = "\n".join(
+        f"- {payload['target_type'].title()}: {payload['event']['title']} at {payload['event']['start'].strftime('%A, %d %B %Y, %I:%M %p %Z')}"
+        for payload in payloads
+    )
+
+    sections = []
+    for payload in payloads:
+        heading = f"## {payload['target_type'].title()} Target: {payload['event']['title']}"
+        sections.append(f"{heading}\n\n{strip_briefing_heading(payload['briefing'])}")
+
+    title = report_event["title"]
+    briefing = f"""# {title}
+
+Generated: {now_local().strftime("%A, %d %B %Y, %I:%M %p %Z")}
+
+Output mode: {mode}
+
+This briefing deliberately outputs only Sprint and Race predictions. Practice, Qualifying, Sprint Qualifying, weather, upgrades, OpenF1, FastF1, Jolpica, track traits, regulations, and historical cache data are used as supporting inputs only.
+
+## Output targets
+
+{targets}
+
+---
+
+{chr(10).join(sections)}
+
+---
+
+Generated by F1 Race Intel. Predictions are model estimates, not guaranteed race results.
+"""
+    return title, briefing
+
+
+def run(force_retrain=False):
+    ensure_dirs()
+    require_env_vars()
+
+    bundle = safe_step("Train/load full-data ML model", train_ml_model, force_retrain)
+    if not bundle:
+        bundle = load_ml_bundle()
+
+    calendar = fetch_ics_calendar()
+    mode, target_events = select_output_events(calendar)
+
+    if not target_events:
+        details = (
+            f"No Sprint/Race output target selected.\\n\\n"
+            f"Output mode: {mode}\\n"
+            f"Reason: Manual runs use weekend mode; scheduled runs use today mode. "
+            f"Practice, Qualifying, and Sprint Qualifying are ignored as direct outputs."
+        )
+        print(details)
+        status_path = save_run_status("Skipped", details)
+        safe_step("Commit status", commit_and_push, [status_path])
+        return
+
+    print("Selected output targets:")
+    for event in target_events:
+        print(f"- {event.get('target_type')}: {event.get('title')} at {event.get('start')}")
+
+    payloads = []
+    errors = []
+
+    for event in target_events:
+        payload = build_single_output_payload(event, bundle)
+        if payload.get("ok"):
+            payloads.append(payload)
+        else:
+            errors.append(payload.get("error", "Unknown target generation error"))
+            print(f"Target skipped: {payload.get('error')}")
+
+    if not payloads:
+        details = "No Sprint/Race target could be generated.\\n\\n" + "\\n".join(f"- {error}" for error in errors)
+        print(details)
+        status_path = save_run_status("Skipped", details)
+        safe_step("Commit status", commit_and_push, [status_path])
+        return
+
+    report_event = make_report_event([payload["event"] for payload in payloads], mode)
+    title, briefing = combine_weekend_briefings(report_event, payloads, mode)
+
+    primary = payloads[-1] if any(payload["target_type"] == "race" for payload in payloads) else payloads[0]
+    markdown_path = save_markdown(report_event, briefing)
+    index_path = update_index(
+        report_event,
+        primary["race"],
+        primary["profile"],
+        primary["weather"],
+        markdown_path,
+        title,
+        primary["top10"],
+        primary["team_fit"],
+        primary["prediction_model"],
+        primary["upgrade_context"],
+        primary["regulation_context"],
+        primary["calendar_context"],
+    )
+
+    generated_targets = ", ".join(f"{payload['target_type']}={payload['event']['title']}" for payload in payloads)
+    status_details = (
+        f"Generated Sprint/Race-only F1 briefing.\\n\\n"
+        f"Output mode: {mode}\\n"
+        f"Targets: {generated_targets}\\n"
+        f"Backfill used this run: {BACKFILL_BUDGET.used}\\n"
+        f"Errors: {'; '.join(errors) if errors else 'None'}"
+    )
+    status_path = save_run_status("Success", status_details)
+
+    debug_path = save_debug({
+        "generated_at": now_local().isoformat(),
+        "output_mode": mode,
+        "selected_targets": [
+            {
+                "title": payload["event"].get("title"),
+                "target_type": payload["target_type"],
+                "start": payload["event"].get("start"),
+            }
+            for payload in payloads
+        ],
+        "primary_target": primary["event"],
+        "race": primary["race"],
+        "payloads": payloads,
+        "errors": errors,
+        "notification_gate": notification_status_for_events([payload["event"] for payload in payloads]),
         "backfill": {
             "limit": BACKFILL_BUDGET.limit,
             "used": BACKFILL_BUDGET.used,
             "races": BACKFILL_BUDGET.fetched,
         },
-        "notification_gate": notification_status(event),
     })
 
     paths = [
@@ -3303,12 +3674,8 @@ def run(force_retrain=False):
         DATA_CACHE_DIR / "ml_full_race_features.csv",
     ]
 
-    notification_gate = notification_status(event)
-    debug_payload_path = debug_path
-
     safe_step("Commit generated files", commit_and_push, paths)
-    maybe_send_outputs(title, briefing, event)
-
+    maybe_send_outputs(title, briefing, [payload["event"] for payload in payloads])
 
 def parse_args():
     parser = argparse.ArgumentParser()

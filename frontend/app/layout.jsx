@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Race Intel | F1 Strategy Dashboard",
-  description: "A free F1 strategy, prediction, weather, model-debug, and live race hub powered by GitHub Actions data.",
+  title: "Race Intel | F1 Predictions",
+  description: "Clean Sprint and Race prediction dashboard powered by GitHub Actions data.",
 };
 
 export default function RootLayout({ children }) {

@@ -2,334 +2,238 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  Activity,
-  BarChart3,
   CalendarDays,
   CheckCircle2,
   Clock,
   Copy,
   ExternalLink,
-  Eye,
   Flag,
   Gauge,
-  PlayCircle,
-  Radio,
   RefreshCw,
-  ShieldAlert,
+  ShieldCheck,
   Timer,
-  Trophy,
-  Video
+  Trophy
 } from "lucide-react";
 
 const DATA_BASE =
   process.env.NEXT_PUBLIC_F1_DATA_BASE_URL ||
-  "https://raw.githubusercontent.com/ShreyTriesToCode/f1-briefing-bot/main";
+  "https://raw.githubusercontent.com/ShreyTriesToCode/f1-race-intel/main";
 
 const OFFICIAL_LINKS = {
-  f1tv: "https://www.formula1.com/en/subscribe-to-f1-tv",
-  liveTiming: "https://www.formula1.com/en/timing/f1-live",
-  schedule: "https://www.formula1.com/en/racing/2026"
+  timing: "https://www.formula1.com/en/timing/f1-live",
+  schedule: "https://www.formula1.com/en/racing/2026",
+  f1tv: "https://www.formula1.com/en/subscribe-to-f1-tv"
 };
 
 const F1_IMG = "https://media.formula1.com/image/upload";
 
-const OFFICIAL_DRIVER_IMAGES = {
-  "george russell": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/mercedes/georus01/2026mercedesgeorus01right.webp`,
-  "kimi antonelli": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/mercedes/andant01/2026mercedesandant01right.webp`,
-  "andrea kimi antonelli": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/mercedes/andant01/2026mercedesandant01right.webp`,
-  "charles leclerc": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/ferrari/chalec01/2026ferrarichalec01right.webp`,
-  "lewis hamilton": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/ferrari/lewham01/2026ferrarilewham01right.webp`,
+const DRIVER_IMAGES = {
   "lando norris": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/mclaren/lannor01/2026mclarenlannor01right.webp`,
   "oscar piastri": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/mclaren/oscpia01/2026mclarenoscpia01right.webp`,
   "max verstappen": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/redbullracing/maxver01/2026redbullracingmaxver01right.webp`,
-  "isack hadjar": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/redbullracing/isahad01/2026redbullracingisahad01right.webp`,
-  "esteban ocon": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/haas/estoco01/2026haasestoco01right.webp`,
-  "oliver bearman": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/haas/olibea01/2026haasolibea01right.webp`,
-  "pierre gasly": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/alpine/piegas01/2026alpinepiegas01right.webp`,
-  "franco colapinto": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/alpine/fracol01/2026alpinefracol01right.webp`,
-  "liam lawson": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/racingbulls/lialaw01/2026racingbullslialaw01right.webp`,
-  "arvid lindblad": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/racingbulls/arvlin01/2026racingbullsarvlin01right.webp`,
+  "charles leclerc": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/ferrari/chalec01/2026ferrarichalec01right.webp`,
+  "lewis hamilton": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/ferrari/lewham01/2026ferrarilewham01right.webp`,
+  "george russell": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/mercedes/georus01/2026mercedesgeorus01right.webp`,
+  "kimi antonelli": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/mercedes/andant01/2026mercedesandant01right.webp`,
+  "andrea kimi antonelli": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/mercedes/andant01/2026mercedesandant01right.webp`,
+  "fernando alonso": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/astonmartin/feralo01/2026astonmartinferalo01right.webp`,
+  "carlos sainz": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/williams/carsai01/2026williamscarsai01right.webp`,
+  "alex albon": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/williams/alealb01/2026williamsalealb01right.webp`,
+  "alexander albon": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/williams/alealb01/2026williamsalealb01right.webp`,
   "nico hulkenberg": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/audi/nichul01/2026audinichul01right.webp`,
   "nico hülkenberg": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/audi/nichul01/2026audinichul01right.webp`,
   "gabriel bortoleto": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/audi/gabbor01/2026audigabbor01right.webp`,
-  "carlos sainz": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/williams/carsai01/2026williamscarsai01right.webp`,
-  "alexander albon": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/williams/alealb01/2026williamsalealb01right.webp`,
-  "alex albon": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/williams/alealb01/2026williamsalealb01right.webp`,
   "sergio perez": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/cadillac/serper01/2026cadillacserper01right.webp`,
   "sergio pérez": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/cadillac/serper01/2026cadillacserper01right.webp`,
-  "valtteri bottas": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/cadillac/valbot01/2026cadillacvalbot01right.webp`,
-  "fernando alonso": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/astonmartin/feralo01/2026astonmartinferalo01right.webp`,
-  "lance stroll": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/astonmartin/lanstr01/2026astonmartinlanstr01right.webp`
+  "valtteri bottas": `${F1_IMG}/c_fill%2Cw_720/q_auto/v1740000001/common/f1/2026/cadillac/valbot01/2026cadillacvalbot01right.webp`
 };
 
-const OFFICIAL_TEAM_CARS = {
-  "mercedes": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/mercedes/2026mercedescarright.webp`,
-  "ferrari": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/ferrari/2026ferraricarright.webp`,
+const TEAM_CARS = {
   "mclaren": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/mclaren/2026mclarencarright.webp`,
+  "ferrari": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/ferrari/2026ferraricarright.webp`,
+  "mercedes": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/mercedes/2026mercedescarright.webp`,
   "red bull racing": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/redbullracing/2026redbullracingcarright.webp`,
   "red bull": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/redbullracing/2026redbullracingcarright.webp`,
-  "haas": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/haas/2026haascarright.webp`,
-  "haas f1 team": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/haas/2026haascarright.webp`,
-  "alpine": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/alpine/2026alpinecarright.webp`,
-  "racing bulls": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/racingbulls/2026racingbullscarright.webp`,
+  "williams": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/williams/2026williamscarright.webp`,
+  "aston martin": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/astonmartin/2026astonmartincarright.webp`,
   "audi": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/audi/2026audicarright.webp`,
   "kick sauber": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/audi/2026audicarright.webp`,
-  "williams": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/williams/2026williamscarright.webp`,
-  "cadillac": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/cadillac/2026cadillaccarright.webp`,
-  "aston martin": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/astonmartin/2026astonmartincarright.webp`
+  "cadillac": `${F1_IMG}/c_lfill%2Cw_3392/q_auto/v1740000001/common/f1/2026/cadillac/2026cadillaccarright.webp`
 };
 
-const SCENARIOS = {
-  baseline: { label: "Baseline", note: "Uses the generated ensemble output without manual bias.", pit: "Follow the generated pit window.", weights: {} },
-  rain: { label: "Rain risk", note: "Boosts reliability, weather adaptation, and strategy execution.", pit: "Delay fixed dry stops. React to crossover timing.", weights: { weather_adaptation: 8, reliability: 6, team_strategy: 5, qualifying: -3 } },
-  safetyCar: { label: "Safety car", note: "Boosts pit execution and strategy swing potential.", pit: "Pit under SC or VSC if tyre age is close to window.", weights: { pit_execution: 8, team_strategy: 7, reliability: 3 } },
-  highDeg: { label: "High degradation", note: "Boosts race pace, tyre handling, pit execution, and consistency.", pit: "Two-stop risk rises. Avoid extending a dead tyre.", weights: { race_pace: 7, pit_execution: 6, reliability: 4, circuit_history: 3 } },
-  lowOvertake: { label: "Low overtaking", note: "Boosts qualifying, pit execution, and track position.", pit: "Undercut becomes stronger. Avoid traffic.", weights: { qualifying: 9, pit_execution: 5, circuit_history: 4, team_strategy: 4 } }
-};
-
-function normalizeKey(value) {
+function key(value) {
   return String(value || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+}
+function cleanTitle(title) {
+  return String(title || "F1 Race Intel")
+    .replace(/^F1 Briefing:\s*/i, "")
+    .replace(/^F1 Weekend Briefing:\s*/i, "")
+    .replace(/\s*Grand Prix$/i, "");
 }
 function initials(name) {
   return String(name || "?").split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
 }
 function driverImage(driver) {
-  const key = normalizeKey(driver?.name || driver);
-  return driver?.image || OFFICIAL_DRIVER_IMAGES[key] || "";
+  return driver?.image || DRIVER_IMAGES[key(driver?.name || driver)] || "";
 }
 function teamCar(team) {
-  const key = normalizeKey(team);
-  return OFFICIAL_TEAM_CARS[key] || "";
+  return TEAM_CARS[key(team)] || "";
 }
-function teamColor(team) {
-  return {
-    "mclaren": "#ff8000", "ferrari": "#e10600", "mercedes": "#00d2be",
-    "red bull racing": "#3671c6", "red bull": "#3671c6", "williams": "#64c4ff",
-    "aston martin": "#229971", "alpine": "#2293d1", "haas": "#b6babd",
-    "haas f1 team": "#b6babd", "racing bulls": "#6692ff", "audi": "#d21f3c",
-    "kick sauber": "#d21f3c", "cadillac": "#c9a646"
-  }[normalizeKey(team)] || "#e10600";
-}
-function cleanTitle(title) {
-  return String(title || "F1 Briefing").replace(/^F1 Briefing:\s*/i, "").replace(/\s*-\s*Race$/i, "");
-}
-function numeric(value) {
-  const match = String(value ?? "").match(/(\d+(?:\.\d+)?)/);
-  return match ? Number(match[1]) : null;
-}
-function level(value) {
-  const text = String(value || "").toLowerCase();
-  if (text.includes("very low")) return 18;
-  if (text.includes("low-medium")) return 34;
-  if (text.includes("low")) return 26;
-  if (text.includes("medium-good")) return 66;
-  if (text.includes("medium-high")) return 76;
-  if (text.includes("medium")) return 54;
-  if (text.includes("good") || text.includes("high")) return 82;
-  return 50;
-}
-function speedLevel(value) {
-  const text = String(value || "").toLowerCase();
-  if (text.includes("straight")) return 88;
-  if (text.includes("aero")) return 76;
-  if (text.includes("traction")) return 58;
-  return 50;
+function esc(value) {
+  return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 function inline(text) {
-  return String(text || "")
-    .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
-    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/`(.*?)`/g, "<code>$1</code>");
+  return esc(text).replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/`(.*?)`/g, "<code>$1</code>");
 }
 function mdToHtml(md) {
   const lines = String(md || "").split("\n");
   let html = "";
   let list = null;
-  const close = () => { if (list) { html += `</${list}>`; list = null; } };
+  const close = () => {
+    if (list) html += `</${list}>`;
+    list = null;
+  };
   for (const raw of lines) {
-    const clean = raw.trim();
-    if (!clean) { close(); continue; }
-    if (clean.startsWith("# ")) { close(); html += `<h1>${inline(clean.slice(2))}</h1>`; }
-    else if (clean.startsWith("## ")) { close(); html += `<h2>${inline(clean.slice(3))}</h2>`; }
-    else if (clean.startsWith("- ")) { if (list !== "ul") { close(); html += "<ul>"; list = "ul"; } html += `<li>${inline(clean.slice(2))}</li>`; }
-    else if (/^\d+\.\s/.test(clean)) { if (list !== "ol") { close(); html += "<ol>"; list = "ol"; } html += `<li>${inline(clean.replace(/^\d+\.\s/, ""))}</li>`; }
-    else if (clean.startsWith("---")) { close(); html += "<hr>"; }
-    else { close(); html += `<p>${inline(clean)}</p>`; }
+    const line = raw.trim();
+    if (!line) {
+      close();
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      close();
+      html += `<h1>${inline(line.slice(2))}</h1>`;
+    } else if (line.startsWith("## ")) {
+      close();
+      html += `<h2>${inline(line.slice(3))}</h2>`;
+    } else if (line.startsWith("- ")) {
+      if (list !== "ul") {
+        close();
+        html += "<ul>";
+        list = "ul";
+      }
+      html += `<li>${inline(line.slice(2))}</li>`;
+    } else if (/^\d+\.\s/.test(line)) {
+      if (list !== "ol") {
+        close();
+        html += "<ol>";
+        list = "ol";
+      }
+      html += `<li>${inline(line.replace(/^\d+\.\s/, ""))}</li>`;
+    } else if (line.startsWith("---")) {
+      close();
+      html += "<hr>";
+    } else {
+      close();
+      html += `<p>${inline(line)}</p>`;
+    }
   }
   close();
   return html;
 }
+function level(value) {
+  const t = String(value || "").toLowerCase();
+  if (t.includes("high")) return 82;
+  if (t.includes("medium-high")) return 74;
+  if (t.includes("medium-good")) return 68;
+  if (t.includes("medium")) return 54;
+  if (t.includes("low-medium")) return 38;
+  if (t.includes("low")) return 26;
+  return 50;
+}
+function parseBriefingTop10(md) {
+  const matches = String(md || "").matchAll(/^\d+\.\s+([^,\n]+)(?:,\s*(.*))?$/gm);
+  return Array.from(matches).slice(0, 10).map((match) => ({
+    name: match[1]?.trim(),
+    reason: match[2]?.trim() || "Model estimate"
+  }));
+}
+function formatTime(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "Start unavailable";
+  return date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
 
 function Countdown({ startIso }) {
-  const [time, setTime] = useState({ d: "--", h: "--", m: "--", s: "--" });
+  const [time, setTime] = useState({ d: "--", h: "--", m: "--" });
   useEffect(() => {
     const target = new Date(startIso || "");
     if (Number.isNaN(target.getTime())) return;
     const tick = () => {
       const diff = target - Date.now();
-      if (diff <= 0) return setTime({ d: "00", h: "00", m: "00", s: "00" });
+      if (diff <= 0) return setTime({ d: "00", h: "00", m: "00" });
       const seconds = Math.floor(diff / 1000);
       setTime({
         d: String(Math.floor(seconds / 86400)).padStart(2, "0"),
         h: String(Math.floor((seconds % 86400) / 3600)).padStart(2, "0"),
-        m: String(Math.floor((seconds % 3600) / 60)).padStart(2, "0"),
-        s: String(seconds % 60).padStart(2, "0")
+        m: String(Math.floor((seconds % 3600) / 60)).padStart(2, "0")
       });
     };
     tick();
-    const id = setInterval(tick, 1000);
+    const id = setInterval(tick, 30000);
     return () => clearInterval(id);
   }, [startIso]);
 
   return (
     <div className="countdown">
-      <div className="timebox"><strong>{time.d}</strong><span>Days</span></div>
-      <div className="timebox"><strong>{time.h}</strong><span>Hours</span></div>
-      <div className="timebox"><strong>{time.m}</strong><span>Min</span></div>
-      <div className="timebox"><strong>{time.s}</strong><span>Sec</span></div>
+      <div><strong>{time.d}</strong><span>Days</span></div>
+      <div><strong>{time.h}</strong><span>Hours</span></div>
+      <div><strong>{time.m}</strong><span>Minutes</span></div>
     </div>
   );
 }
 
-function DriverImage({ driver }) {
+function DriverArt({ driver }) {
   const [failed, setFailed] = useState(false);
   const src = driverImage(driver);
-  if (!src || failed) return <div className="fallback-driver">{initials(driver?.name)}</div>;
-  return <img className="driver-img" src={src} alt={driver?.name || "F1 driver"} onError={() => setFailed(true)} />;
+  if (!src || failed) return <div className="driver-fallback">{initials(driver?.name)}</div>;
+  return <img src={src} alt={driver?.name || "Driver"} onError={() => setFailed(true)} />;
 }
 
 function TeamCar({ team }) {
   const [failed, setFailed] = useState(false);
   const src = teamCar(team);
   if (!src || failed) return <span className="team-fallback">{initials(team)}</span>;
-  return <img className="team-car" src={src} alt={`${team} car`} onError={() => setFailed(true)} />;
+  return <img src={src} alt={`${team} car`} onError={() => setFailed(true)} />;
 }
 
-function DriverCard({ driver, index, onOpen }) {
-  const color = teamColor(driver.team);
+function TargetTabs({ targets, activeIndex, setActiveIndex }) {
+  if (!targets.length) return null;
   return (
-    <article className={`driver-card ${index === 0 ? "featured" : ""}`} style={{ borderColor: `${color}88` }} onClick={() => onOpen(driver)}>
-      <div className="driver-content">
-        <span className="driver-rank" style={{ background: color }}>{index + 1}</span>
-        <strong className="driver-name">{driver.name || "Unknown Driver"}</strong>
-        <span className="driver-reason">{driver.reason || "Dynamic prediction"}</span>
-        <span className="driver-team">
-          {driver.team || "Team pending"}
-          {driver.score !== undefined && <span className="score-pill">Score {driver.score}</span>}
-          {driver.confidence !== undefined && <span>{driver.confidence}% confidence</span>}
-        </span>
-      </div>
-      <div className="driver-media"><DriverImage driver={driver} /></div>
-    </article>
-  );
-}
-
-function DetailModal({ driver, onClose }) {
-  if (!driver) return null;
-  const rows = Object.entries(driver.component_scores || {}).filter(([, v]) => v !== null && v !== undefined);
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <div>
-            <h3>{driver.name}</h3>
-            <p className="mini">{driver.team} · Score {driver.score} · Confidence {driver.confidence}%</p>
-          </div>
-          <button className="close-btn" onClick={onClose}>Close</button>
-        </div>
-        <p className="impact">{driver.reason}</p>
-        <div className="debug-table">
-          {rows.map(([key, value]) => (
-            <div className="debug-row" key={key}>
-              <span>{key.replaceAll("_", " ")}</span>
-              <strong>{value}</strong>
-            </div>
-          ))}
-        </div>
-      </div>
+    <div className="target-tabs">
+      {targets.map((target, index) => (
+        <button
+          key={`${target.target_type}-${target.event?.title || index}`}
+          className={activeIndex === index ? "active" : ""}
+          onClick={() => setActiveIndex(index)}
+        >
+          <span>{String(target.target_type || "target").toUpperCase()}</span>
+          <strong>{target.event?.title || target.title || "F1 target"}</strong>
+        </button>
+      ))}
     </div>
   );
 }
 
-function StrategySimulator({ active, onChange, top10 }) {
-  const scenario = SCENARIOS[active];
-  const adjusted = useMemo(() => {
-    return (top10 || []).map((driver) => {
-      let delta = 0;
-      const comps = driver.component_scores || {};
-      for (const [key, bias] of Object.entries(scenario.weights || {})) {
-        const value = comps[key];
-        if (typeof value === "number") delta += (value / 100) * bias;
-      }
-      return { ...driver, simScore: Math.round((Number(driver.score || 0) + delta) * 10) / 10 };
-    }).sort((a, b) => b.simScore - a.simScore).slice(0, 5);
-  }, [active, top10, scenario]);
-
+function PredictionList({ predictions }) {
+  const list = predictions?.length ? predictions.slice(0, 10) : [{ name: "No prediction yet", reason: "Run the workflow once." }];
   return (
-    <article className="card simulator" id="simulator">
-      <div className="section-title">
-        <h3>Strategy Simulator</h3>
-        <span className="mini">Scenario model</span>
-      </div>
-      <div className="scenario-tabs">
-        {Object.entries(SCENARIOS).map(([key, item]) => (
-          <button className={`ghost-btn ${active === key ? "active" : ""}`} key={key} onClick={() => onChange(key)}>
-            {item.label}
-          </button>
-        ))}
-      </div>
-      <div className="impact">{scenario.note}<br />Pit idea: {scenario.pit}</div>
-      <ul className="list" style={{ marginTop: 14 }}>
-        {adjusted.map((driver, index) => (
-          <li className="row" key={driver.driver_id || driver.name}>
-            <span>{index + 1}. {driver.name}</span>
-            <strong>{driver.simScore}</strong>
-          </li>
-        ))}
-      </ul>
-    </article>
-  );
-}
-
-function LiveHub({ top10 }) {
-  const rows = (top10 || []).slice(0, 10).map((driver, index) => ({
-    pos: index + 1,
-    driver: driver.name,
-    team: driver.team,
-    gap: index === 0 ? "Leader" : `+${(index * 2.4 + 0.8).toFixed(1)}s`,
-    tyre: index % 3 === 0 ? "M" : index % 3 === 1 ? "H" : "S"
-  }));
-
-  return (
-    <article className="card live" id="live">
-      <div className="section-title">
-        <h3>Live Race Hub</h3>
-        <span className="mini">Legal timing-style dashboard, no pirate video</span>
-      </div>
-      <div className="live-board">
-        <div>
-          <div className="live-row header">
-            <span>POS</span><span>Driver</span><span>Team</span><span className="hide-mobile">Gap</span><span className="hide-mobile">Tyre</span>
+    <div className="prediction-list">
+      {list.map((driver, index) => (
+        <article className={`prediction-card ${index === 0 ? "leader" : ""}`} key={`${driver.driver_id || driver.name}-${index}`}>
+          <div className="rank">{index + 1}</div>
+          <div className="prediction-copy">
+            <strong>{driver.name}</strong>
+            <span>{driver.team || "Team pending"}</span>
+            <p>{driver.reason || "Model estimate"}</p>
+            <div className="chips tight">
+              {driver.score !== undefined && <small>Score {driver.score}</small>}
+              {driver.confidence !== undefined && <small>{driver.confidence}% confidence</small>}
+            </div>
           </div>
-          <div className="timing-table">
-            {rows.map((row) => (
-              <div className="live-row" key={row.driver}>
-                <span className="rank-badge">{row.pos}</span>
-                <strong>{row.driver}</strong>
-                <span>{row.team || "-"}</span>
-                <span className="hide-mobile">{row.gap}</span>
-                <span className="hide-mobile">{row.tyre}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="race-control">
-          <div className="rc-card"><Radio size={16} /> Race-control style panel is based on generated data until live timing API access exists.</div>
-          <div className="rc-card"><Video size={16} /> Watch the race legally through F1 TV or your broadcaster. This app only links to official viewing.</div>
-          <a className="ghost-btn" href={OFFICIAL_LINKS.f1tv} target="_blank" rel="noreferrer"><PlayCircle size={16} /> Open F1 TV</a>
-          <a className="ghost-btn" href={OFFICIAL_LINKS.liveTiming} target="_blank" rel="noreferrer"><Timer size={16} /> Open official live timing</a>
-        </div>
-      </div>
-    </article>
+          <div className="driver-art"><DriverArt driver={driver} /></div>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -339,22 +243,8 @@ export default function Home() {
   const [debug, setDebug] = useState(null);
   const [markdown, setMarkdown] = useState("");
   const [status, setStatus] = useState("Waiting for data");
-  const [selected, setSelected] = useState(null);
-  const [scenario, setScenario] = useState("baseline");
   const [copied, setCopied] = useState(false);
-
-  async function loadIndex() {
-    setStatus("Syncing data");
-    const res = await fetch(`${DATA_BASE}/briefings/index.json?v=${Date.now()}`);
-    if (!res.ok) throw new Error(`index HTTP ${res.status}`);
-    const data = await res.json();
-    const list = Array.isArray(data) ? data : (data.briefings || []);
-    list.sort((a, b) => String(b.generated_iso || b.generated || b.start || "").localeCompare(String(a.generated_iso || a.generated || a.start || "")));
-    setIndexData(list);
-    await loadDebug();
-    if (list.length) await loadBriefing(list[0]);
-    else setStatus("No briefings found");
-  }
+  const [targetIndex, setTargetIndex] = useState(0);
 
   async function loadDebug() {
     try {
@@ -370,34 +260,62 @@ export default function Home() {
     setActive(item);
     const res = await fetch(`${DATA_BASE}/${item.path}?v=${Date.now()}`);
     if (!res.ok) throw new Error(`briefing HTTP ${res.status}`);
-    const text = await res.text();
-    setMarkdown(text);
-    setStatus("Briefing loaded");
+    setMarkdown(await res.text());
+    setTargetIndex(0);
+    setStatus("Ready");
+  }
+
+  async function loadIndex() {
+    setStatus("Syncing");
+    const res = await fetch(`${DATA_BASE}/briefings/index.json?v=${Date.now()}`);
+    if (!res.ok) throw new Error(`index HTTP ${res.status}`);
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : data.briefings || [];
+    list.sort((a, b) => String(b.generated_iso || b.generated || b.start || "").localeCompare(String(a.generated_iso || a.generated || a.start || "")));
+    setIndexData(list);
+    await loadDebug();
+    if (list[0]) await loadBriefing(list[0]);
+    else setStatus("No briefings");
   }
 
   useEffect(() => {
     loadIndex().catch((error) => {
       console.error(error);
-      setStatus("No data loaded");
+      setStatus("No data");
     });
   }, []);
 
-  const top10 = active?.top10 || [];
-  const topDriver = top10[0] || {};
-  const weather = active?.weather || {};
-  const model = active?.prediction_model || {};
-  const weights = model.weights || {};
-  const available = model.available_components || {};
-  const raceTitle = cleanTitle(active?.title || active?.event_title || "F1 Dashboard");
-  const startDate = active?.start_iso ? new Date(active.start_iso) : null;
-  const carSrc = teamCar(topDriver.team);
-  const heroDriverSrc = driverImage(topDriver);
+  const targets = useMemo(() => {
+    const payloads = Array.isArray(debug?.payloads) ? debug.payloads.filter((p) => p?.ok !== false) : [];
+    if (payloads.length) return payloads;
+    if (!active) return [];
+    return [{
+      event: { title: active.event_title || active.title, start: active.start_iso || active.start },
+      target_type: active.prediction_model?.output_target_type || "race",
+      top10: active.top10 || [],
+      profile: active,
+      weather: active.weather || {},
+      team_fit: active.team_fit || [],
+      prediction_model: active.prediction_model || {}
+    }];
+  }, [debug, active]);
+
+  const selectedTarget = targets[targetIndex] || targets[0] || {};
+  const profile = selectedTarget.profile || active || {};
+  const weather = selectedTarget.weather || active?.weather || {};
+  const model = selectedTarget.prediction_model || active?.prediction_model || {};
+  const predictions = selectedTarget.top10?.length ? selectedTarget.top10 : active?.top10?.length ? active.top10 : parseBriefingTop10(markdown);
+  const topDriver = predictions[0] || {};
+  const title = cleanTitle(active?.title || selectedTarget?.event?.title || "Race Intel");
   const html = useMemo(() => mdToHtml(markdown), [markdown]);
+  const car = teamCar(topDriver.team);
+  const canCopy = Boolean(markdown);
 
   async function copyBriefing() {
-    await navigator.clipboard.writeText(markdown || "");
+    if (!canCopy) return;
+    await navigator.clipboard.writeText(markdown);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1700);
+    setTimeout(() => setCopied(false), 1400);
   }
 
   return (
@@ -407,122 +325,118 @@ export default function Home() {
           <div className="brand-mark">F1</div>
           <div>
             <strong>Race Intel</strong>
-            <span>Prediction, strategy, live hub</span>
+            <span>Sprint and Race predictions</span>
           </div>
         </div>
-        <div className="nav-links">
-          <a href="#overview">Overview</a>
-          <a href="#live">Live Hub</a>
-          <a href="#prediction">Prediction</a>
-          <a href="#simulator">Simulator</a>
-          <a href="#model">Model</a>
-          <button className="pill-btn" onClick={() => loadIndex().catch(() => setStatus("Refresh failed"))}>
-            <RefreshCw size={14} /> Refresh
-          </button>
+        <div className="nav-actions">
+          <a href={OFFICIAL_LINKS.timing} target="_blank" rel="noreferrer"><Timer size={15} /> Live timing</a>
+          <a href={OFFICIAL_LINKS.schedule} target="_blank" rel="noreferrer"><CalendarDays size={15} /> Calendar</a>
+          <button onClick={() => loadIndex().catch(() => setStatus("Refresh failed"))}><RefreshCw size={15} /> Refresh</button>
         </div>
-        <div className="sync"><i className="dot" /><span>{status}</span></div>
+        <div className="status"><i /><span>{status}</span></div>
       </nav>
 
-      <section className="hero" id="overview">
-        <article className="panel hero-main">
-          <div className="track-ring" />
-          {carSrc && <img className="hero-car" src={carSrc} alt="" />}
-          {heroDriverSrc && <img className="hero-driver" src={heroDriverSrc} alt="" />}
+      <section className="hero">
+        <article className="hero-panel">
+          {car && <img className="hero-car" src={car} alt="" />}
           <div className="hero-content">
             <div className="chips">
-              <span className="chip red">Race briefing</span>
-              <span className="chip lime">{model.prediction_stage_label || "Free-data model"}</span>
-              <span className="chip cyan">Jolpica + FastF1 + Open-Meteo</span>
-              <span className="chip amber">ML-inspired ensemble</span>
+              <span>Weekend mode ready</span>
+              <span>{model.prediction_stage_label || "Model active"}</span>
+              <span>{model.output_target_type || "Sprint/Race"}</span>
             </div>
-            <h1><span>{raceTitle}</span><br /><span className="outline">Grand Prix</span></h1>
-            <p className="summary">
-              Hybrid model: the free-data backend is combined with Mintlify-style F1 ML features including grid position, driver history, recent form,
-              team average performance, circuit experience, tyre strategy, weather impact, and race simulation signals.
+            <h1>{title}</h1>
+            <p>
+              Clean view of the next Sprint and Race predictions. Qualifying, practice, weather, upgrades,
+              track traits, current-season car form, and historical data remain inputs.
             </p>
           </div>
-          <div className="hero-footer">
-            <div className="stat"><span>Circuit</span><strong>{active?.circuit || "-"}</strong></div>
-            <div className="stat"><span>Track Type</span><strong>{active?.track_type || "-"}</strong></div>
-            <div className="stat"><span>Dominance</span><strong>{active?.dominance || "-"}</strong></div>
-            <div className="stat"><span>Safety Car</span><strong>{active?.safety_car || "-"}</strong></div>
+          <div className="hero-stats">
+            <div><span>Circuit</span><strong>{profile.circuit || active?.circuit || "-"}</strong></div>
+            <div><span>Target</span><strong>{String(selectedTarget.target_type || model.output_target_type || "Race").toUpperCase()}</strong></div>
+            <div><span>Generated</span><strong>{active?.generated || "-"}</strong></div>
           </div>
         </article>
 
-        <aside className="side">
-          <article className="panel box">
-            <div className="section-title">
-              <h2>Race Countdown</h2>
-              <span className="mini">{startDate && !Number.isNaN(startDate.getTime()) ? startDate.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "Start unavailable"}</span>
-            </div>
-            <Countdown startIso={active?.start_iso} />
+        <aside className="side-card">
+          <div className="section-head">
+            <h2>Next target</h2>
+            <Clock size={18} />
+          </div>
+          <p className="muted">{selectedTarget.event?.title || active?.event_title || "No target loaded"}</p>
+          <strong className="time">{formatTime(selectedTarget.event?.start || active?.start_iso || active?.start)}</strong>
+          <Countdown startIso={selectedTarget.event?.start || active?.start_iso} />
+        </aside>
+      </section>
+
+      <TargetTabs targets={targets} activeIndex={targetIndex} setActiveIndex={setTargetIndex} />
+
+      <section className="layout">
+        <article className="card prediction-section">
+          <div className="section-head">
+            <h2>Prediction</h2>
+            <Trophy size={18} />
+          </div>
+          <PredictionList predictions={predictions} />
+        </article>
+
+        <aside className="stack">
+          <article className="card">
+            <div className="section-head"><h2>Track</h2><Gauge size={18} /></div>
+            <div className="fact"><span>Car trait</span><strong>{profile.car_trait || active?.car_trait || "-"}</strong></div>
+            <div className="fact"><span>Speed profile</span><strong>{profile.speed_profile || active?.speed_profile || "-"}</strong></div>
+            <div className="fact"><span>Overtaking</span><strong>{profile.overtaking || active?.overtaking || "-"}</strong></div>
+            <div className="bar"><i style={{ "--value": `${level(profile.overtaking || active?.overtaking)}%` }} /></div>
+            <div className="fact"><span>Tyre stress</span><strong>{profile.tyre_stress || active?.tyre_stress || "-"}</strong></div>
+            <div className="bar"><i style={{ "--value": `${level(profile.tyre_stress || active?.tyre_stress)}%` }} /></div>
           </article>
 
-          <article className="panel box">
-            <div className="section-title"><h2>Weather</h2><span className="mini">{weather.source || "Open-Meteo"}</span></div>
-            <div className="weather-grid">
-              <div className="weather-item"><span>Air</span><strong>{weather.temperature || "-"}</strong></div>
-              <div className="weather-item"><span>Track</span><strong>{weather.track_temperature || "Unavailable"}</strong></div>
-              <div className="weather-item"><span>Rain</span><strong>{weather.rain || "-"}</strong></div>
-              <div className="weather-item"><span>Wind</span><strong>{weather.wind || "-"}</strong></div>
+          <article className="card">
+            <div className="section-head"><h2>Weather</h2><Flag size={18} /></div>
+            <div className="mini-grid">
+              <div><span>Temp</span><strong>{weather.temperature || "-"}</strong></div>
+              <div><span>Rain</span><strong>{weather.rain || "-"}</strong></div>
+              <div><span>Wind</span><strong>{weather.wind || "-"}</strong></div>
+              <div><span>Source</span><strong>{weather.source || "Open-Meteo"}</strong></div>
             </div>
-            <div className="impact">{weather.impact || "Weather impact will appear after the next briefing run."}</div>
+            <p className="note">{weather.impact || "Weather impact appears after the next run."}</p>
+          </article>
+
+          <article className="card">
+            <div className="section-head"><h2>Strategy</h2><ShieldCheck size={18} /></div>
+            <div className="fact"><span>Baseline</span><strong>{profile.strategy_bias || active?.strategy_bias || "-"}</strong></div>
+            <div className="fact"><span>Pit window</span><strong>{profile.pit_window || active?.pit_window || "-"}</strong></div>
+            <p className="note">Main risk: tyre drop-off, safety-car timing, traffic after pit stop, and weather crossover.</p>
           </article>
         </aside>
       </section>
 
-      <section className="grid" id="strategy">
-        <article className="card track">
-          <div className="section-title"><h3>Track Model</h3><span className="mini">Historical + weather</span></div>
-          <ul className="list">
-            <li><div className="row"><span>Speed profile</span><strong>{active?.speed_profile || "-"}</strong></div><div className="meter"><span style={{ "--value": `${speedLevel(active?.speed_profile)}%` }} /></div></li>
-            <li><div className="row"><span>Tyre stress</span><strong>{active?.tyre_stress || "-"}</strong></div><div className="meter"><span style={{ "--value": `${level(active?.tyre_stress)}%` }} /></div></li>
-            <li><div className="row"><span>Overtaking</span><strong>{active?.overtaking || "-"}</strong></div><div className="meter"><span style={{ "--value": `${level(active?.overtaking)}%` }} /></div></li>
-          </ul>
-        </article>
-
-        <article className="card strategy">
-          <div className="section-title"><h3>Strategy Board</h3><span className="mini">Pit logic</span></div>
-          <ul className="list">
-            <li className="row"><span>Baseline</span><strong>{active?.strategy_bias || "-"}</strong></li>
-            <li className="row"><span>Pit Window</span><strong>{active?.pit_window || "-"}</strong></li>
-            <li className="row"><span>Wet Plan</span><strong>{numeric(weather.rain) >= 35 ? "Keep crossover open" : "Dry baseline"}</strong></li>
-            <li className="row"><span>Undercut</span><strong>{String(active?.overtaking).includes("low") ? "Strong" : "Medium"}</strong></li>
-          </ul>
-        </article>
-
-        <article className="card teams">
-          <div className="section-title"><h3>Team Fit</h3><span className="mini">Dynamic</span></div>
-          <ul className="list">
-            {(active?.team_fit || []).slice(0, 5).map((team, index) => (
-              <li className="team" key={team}>
+      <section className="layout small">
+        <article className="card">
+          <div className="section-head"><h2>Team fit</h2><CheckCircle2 size={18} /></div>
+          <div className="team-list">
+            {(selectedTarget.team_fit || active?.team_fit || []).slice(0, 5).map((team, index) => (
+              <div className="team" key={`${team}-${index}`}>
                 <TeamCar team={team} />
-                <div><strong>{index + 1}. {team}</strong><span>Team form and circuit-fit estimate</span></div>
-              </li>
-            ))}
-          </ul>
-        </article>
-      </section>
-
-      <section className="grid">
-        <LiveHub top10={top10} />
-      </section>
-
-      <section className="grid" id="prediction">
-        <article className="card top10">
-          <div className="section-title"><h3>Potential Top 10</h3><span className="mini">Click driver for model details</span></div>
-          <div className="prediction-grid">
-            {(top10.length ? top10 : [{ name: "No prediction yet", reason: "Run GitHub Actions once." }]).slice(0, 10).map((driver, index) => (
-              <DriverCard key={driver.driver_id || driver.name} driver={driver} index={index} onOpen={setSelected} />
+                <div><strong>{index + 1}. {team}</strong><span>Track-fit and form estimate</span></div>
+              </div>
             ))}
           </div>
         </article>
 
-        <article className="card archive">
-          <div className="section-title"><h3>Briefing Archive</h3><span className="mini">{indexData.length} files</span></div>
+        <article className="card">
+          <div className="section-head"><h2>Data status</h2><ExternalLink size={18} /></div>
+          <div className="fact"><span>Output mode</span><strong>{debug?.output_mode || "Latest"}</strong></div>
+          <div className="fact"><span>Backfill used</span><strong>{debug?.backfill?.used ?? "-"}</strong></div>
+          <div className="fact"><span>ML model</span><strong>{model.ml_model_loaded ? "Loaded" : "Fallback"}</strong></div>
+          <div className="fact"><span>OpenF1</span><strong>{model.available_components?.openf1_provider_status || "Fallback if unavailable"}</strong></div>
+        </article>
+
+        <article className="card">
+          <div className="section-head"><h2>Archive</h2><CalendarDays size={18} /></div>
           <div className="archive-list">
-            {indexData.map((item) => (
-              <button className={`archive-item ${active?.path === item.path ? "active" : ""}`} key={item.path} onClick={() => loadBriefing(item)}>
+            {indexData.slice(0, 8).map((item) => (
+              <button className={active?.path === item.path ? "active" : ""} key={item.path} onClick={() => loadBriefing(item)}>
                 <strong>{item.title}</strong>
                 <span>{item.generated || item.start || item.path}</span>
               </button>
@@ -531,46 +445,17 @@ export default function Home() {
         </article>
       </section>
 
-      <section className="grid" id="model">
-        <StrategySimulator active={scenario} onChange={setScenario} top10={top10} />
-
-        <article className="card model">
-          <div className="section-title"><h3>Model Transparency</h3><span className="mini">Weights + data audit</span></div>
-          <div className="audit-grid">
-            <div className="audit-item"><span>Stage</span><strong>{model.prediction_stage_label || "Unknown"}</strong></div>
-            <div className="audit-item"><span>Source</span><strong>{model.source || "Generated backend"}</strong></div>
-            <div className="audit-item"><span>FastF1</span><strong>{available.fastf1_race_pace || available.fastf1_qualifying ? "Used" : "Optional / limited"}</strong></div>
-            <div className="audit-item"><span>Debug</span><strong>{debug ? "Loaded" : "Not loaded"}</strong></div>
-          </div>
-          <div className="debug-table" style={{ marginTop: 14 }}>
-            {Object.entries(weights).map(([key, value]) => (
-              <div className="debug-row" key={key}>
-                <span>{key.replaceAll("_", " ")}</span>
-                <strong>{(value * 100).toFixed(1)}%</strong>
-              </div>
-            ))}
-          </div>
-        </article>
-      </section>
-
-      <section className="grid">
-        <article className="card briefing" id="briefing">
-          <div className="section-title">
-            <h3>Full Briefing</h3>
-            <div className="briefing-tools">
-              <button className="ghost-btn" onClick={copyBriefing}><Copy size={16} /> {copied ? "Copied" : "Copy"}</button>
-              <a className="ghost-btn" href={OFFICIAL_LINKS.schedule} target="_blank" rel="noreferrer"><CalendarDays size={16} /> Official schedule</a>
-            </div>
-          </div>
-          <div className="briefing-text" dangerouslySetInnerHTML={{ __html: html || "<p>No briefing loaded yet.</p>" }} />
-        </article>
+      <section className="card briefing">
+        <div className="section-head">
+          <h2>Briefing text</h2>
+          <button className="copy" onClick={copyBriefing}><Copy size={15} /> {copied ? "Copied" : "Copy"}</button>
+        </div>
+        <div className="briefing-text" dangerouslySetInnerHTML={{ __html: html || "<p>No briefing loaded.</p>" }} />
       </section>
 
       <footer>
-        Free Vercel dashboard powered by your GitHub Actions data. It links to official viewing sources and does not stream race video.
+        Race Intel uses generated GitHub Actions data and links to official viewing/timing sources. It does not stream race video.
       </footer>
-
-      <DetailModal driver={selected} onClose={() => setSelected(null)} />
     </main>
   );
 }
