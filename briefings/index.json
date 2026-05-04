@@ -1,6 +1,881 @@
 {
   "briefings": [
     {
+      "title": "F1 Weekend Briefing: Canadian Grand Prix Sprint + Race",
+      "path": "briefings/2026-05-23-f1-weekend-briefing-canadian-grand-prix-sprint-race.md",
+      "generated": "2026-05-04 05:54 IST",
+      "generated_iso": "2026-05-04T05:54:44.227530+05:30",
+      "start_iso": "2026-05-23T02:00:00+05:30",
+      "start": "Saturday, 23 May 2026, 02:00 AM IST",
+      "event_title": "F1 Weekend Briefing: Canadian Grand Prix Sprint + Race",
+      "location": "",
+      "jolpica_race": {
+        "season": "2026",
+        "round": "5",
+        "url": "https://en.wikipedia.org/wiki/2026_Canadian_Grand_Prix",
+        "raceName": "Canadian Grand Prix",
+        "Circuit": {
+          "circuitId": "villeneuve",
+          "url": "https://en.wikipedia.org/wiki/Circuit_Gilles_Villeneuve",
+          "circuitName": "Circuit Gilles Villeneuve",
+          "Location": {
+            "lat": "45.5",
+            "long": "-73.5228",
+            "locality": "Montreal",
+            "country": "Canada"
+          }
+        },
+        "date": "2026-05-24",
+        "time": "20:00:00Z",
+        "FirstPractice": {
+          "date": "2026-05-22",
+          "time": "16:30:00Z"
+        },
+        "Qualifying": {
+          "date": "2026-05-23",
+          "time": "20:00:00Z"
+        },
+        "Sprint": {
+          "date": "2026-05-23",
+          "time": "16:00:00Z"
+        },
+        "SprintQualifying": {
+          "date": "2026-05-22",
+          "time": "20:30:00Z"
+        }
+      },
+      "circuit": "Circuit Gilles Villeneuve",
+      "city": "Montreal",
+      "country": "Canada",
+      "circuit_key": "villeneuve",
+      "meeting_key": "2026-5",
+      "track_type": "permanent circuit",
+      "dominance": "tyre management and thermal control",
+      "speed_profile": "balanced speed profile",
+      "car_trait": "balanced aero, traction, braking, and tyre management",
+      "overtaking": "medium-good",
+      "tyre_stress": "medium-high",
+      "safety_car": "high",
+      "strategy_bias": "two-stop risk if degradation appears in long runs",
+      "pit_window": "Lap 16-28, with safety car flexibility.",
+      "setup": "balanced aero, traction, braking, and tyre management",
+      "team_fit": [
+        "Mercedes",
+        "Ferrari",
+        "McLaren",
+        "Red Bull",
+        "Alpine F1 Team"
+      ],
+      "weather": {
+        "source": "Open-Meteo forecast",
+        "temperature": "15.0°C",
+        "rain": "24%",
+        "humidity": "41%",
+        "wind": "8.9 km/h",
+        "wind_gust": "9.4 km/h",
+        "cloud_cover": "68%",
+        "track_temperature": "Unavailable",
+        "rain_score": 24.0,
+        "heat_score": 55,
+        "wind_score": 24.44,
+        "impact": "dry baseline more likely"
+      },
+      "top10": [
+        {
+          "name": "Andrea Kimi Antonelli",
+          "team": "Mercedes",
+          "driver_id": "antonelli",
+          "score": 81.47,
+          "confidence": 54.9,
+          "reason": "car performance; driver form; same-circuit history; pit-stop execution; constructor form",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 100.0,
+            "driver_skill": 95.15,
+            "car_performance": 80.73,
+            "constructor_form": 86.25,
+            "current_season_car_performance": 93.35,
+            "current_season_recent_form": 65.97,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": 40,
+            "regulation_fit": 71.09,
+            "calendar_confidence": 80,
+            "recent_result": 100.0,
+            "qualifying": null,
+            "circuit_history": 90.48,
+            "race_pace": null,
+            "pit_execution": 99.36,
+            "team_strategy": 63.53,
+            "reliability": 90.0,
+            "team_track_fit": 77.91,
+            "weather_adaptation": 83.53,
+            "track_trait_fit": 82.12,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "George Russell",
+          "team": "Mercedes",
+          "driver_id": "russell",
+          "score": 75.35,
+          "confidence": 54.9,
+          "reason": "car performance; driver form; pit-stop execution; same-circuit history; constructor form",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 80.0,
+            "driver_skill": 78.87,
+            "car_performance": 80.73,
+            "constructor_form": 86.25,
+            "current_season_car_performance": 93.35,
+            "current_season_recent_form": 65.97,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": 40,
+            "regulation_fit": 69.64,
+            "calendar_confidence": 80,
+            "recent_result": 85.71,
+            "qualifying": null,
+            "circuit_history": 75.17,
+            "race_pace": null,
+            "pit_execution": 95.41,
+            "team_strategy": 52.84,
+            "reliability": 82.0,
+            "team_track_fit": 77.91,
+            "weather_adaptation": 72.57,
+            "track_trait_fit": 81.52,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "Lewis Hamilton",
+          "team": "Ferrari",
+          "driver_id": "hamilton",
+          "score": 64.81,
+          "confidence": 54.9,
+          "reason": "car performance; same-circuit history; team strategy gain; regulation-era fit; driver form",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 49.0,
+            "driver_skill": 67.84,
+            "car_performance": 64.05,
+            "constructor_form": 63.64,
+            "current_season_car_performance": 77.45,
+            "current_season_recent_form": 54.12,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": 40,
+            "regulation_fit": 65.4,
+            "calendar_confidence": 80,
+            "recent_result": 71.43,
+            "qualifying": null,
+            "circuit_history": 84.69,
+            "race_pace": null,
+            "pit_execution": 57.75,
+            "team_strategy": 66.4,
+            "reliability": 90.0,
+            "team_track_fit": 67.35,
+            "weather_adaptation": 82.44,
+            "track_trait_fit": 64.75,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "Charles Leclerc",
+          "team": "Ferrari",
+          "driver_id": "leclerc",
+          "score": 62.63,
+          "confidence": 54.9,
+          "reason": "car performance; driver form; same-circuit history; team strategy gain; regulation-era fit",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 63.0,
+            "driver_skill": 66.58,
+            "car_performance": 64.05,
+            "constructor_form": 63.64,
+            "current_season_car_performance": 77.45,
+            "current_season_recent_form": 54.12,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": 40,
+            "regulation_fit": 63.68,
+            "calendar_confidence": 80,
+            "recent_result": 76.19,
+            "qualifying": null,
+            "circuit_history": 63.95,
+            "race_pace": null,
+            "pit_execution": 38.15,
+            "team_strategy": 71.6,
+            "reliability": 80.5,
+            "team_track_fit": 67.35,
+            "weather_adaptation": 73.1,
+            "track_trait_fit": 61.81,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "Oscar Piastri",
+          "team": "McLaren",
+          "driver_id": "piastri",
+          "score": 58.73,
+          "confidence": 54.9,
+          "reason": "car performance; same-circuit history; pit-stop execution; regulation-era fit; recent race result",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 43.0,
+            "driver_skill": 61.74,
+            "car_performance": 53.82,
+            "constructor_form": 52.48,
+            "current_season_car_performance": 61.38,
+            "current_season_recent_form": 43.72,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": 40,
+            "regulation_fit": 61.92,
+            "calendar_confidence": 80,
+            "recent_result": 90.48,
+            "qualifying": null,
+            "circuit_history": 74.77,
+            "race_pace": null,
+            "pit_execution": 70.29,
+            "team_strategy": 36.54,
+            "reliability": 90.0,
+            "team_track_fit": 62.99,
+            "weather_adaptation": 71.88,
+            "track_trait_fit": 60.88,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "Max Verstappen",
+          "team": "Red Bull",
+          "driver_id": "max_verstappen",
+          "score": 56.99,
+          "confidence": 54.9,
+          "reason": "same-circuit history; pit-stop execution; car performance; team strategy gain; regulation-era fit",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 26.0,
+            "driver_skill": 60.66,
+            "car_performance": 41.84,
+            "constructor_form": 31.96,
+            "current_season_car_performance": 49.67,
+            "current_season_recent_form": 31.16,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": 40,
+            "regulation_fit": 54.49,
+            "calendar_confidence": 80,
+            "recent_result": 80.95,
+            "qualifying": null,
+            "circuit_history": 98.5,
+            "race_pace": null,
+            "pit_execution": 74.32,
+            "team_strategy": 66.33,
+            "reliability": 90.0,
+            "team_track_fit": 62.29,
+            "weather_adaptation": 86.74,
+            "track_trait_fit": 56.94,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "Lando Norris",
+          "team": "McLaren",
+          "driver_id": "norris",
+          "score": 54.54,
+          "confidence": 54.9,
+          "reason": "car performance; driver form; regulation-era fit; recent race result; pit-stop execution",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 51.0,
+            "driver_skill": 55.26,
+            "car_performance": 53.82,
+            "constructor_form": 52.48,
+            "current_season_car_performance": 61.38,
+            "current_season_recent_form": 43.72,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": 40,
+            "regulation_fit": 59.92,
+            "calendar_confidence": 80,
+            "recent_result": 95.24,
+            "qualifying": null,
+            "circuit_history": 47.82,
+            "race_pace": null,
+            "pit_execution": 56.25,
+            "team_strategy": 28.49,
+            "reliability": 79.0,
+            "team_track_fit": 62.99,
+            "weather_adaptation": 56.63,
+            "track_trait_fit": 58.77,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "Pierre Gasly",
+          "team": "Alpine F1 Team",
+          "driver_id": "gasly",
+          "score": 46.35,
+          "confidence": 50.2,
+          "reason": "team strategy gain; pit-stop execution; car performance; regulation-era fit; same-circuit history",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 16.0,
+            "driver_skill": 36.95,
+            "car_performance": 37.99,
+            "constructor_form": 28.72,
+            "current_season_car_performance": 47.55,
+            "current_season_recent_form": 33.31,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": null,
+            "regulation_fit": 51.18,
+            "calendar_confidence": 80,
+            "recent_result": 4.76,
+            "qualifying": null,
+            "circuit_history": 45.24,
+            "race_pace": null,
+            "pit_execution": 73.04,
+            "team_strategy": 82.4,
+            "reliability": 79.0,
+            "team_track_fit": 52.61,
+            "weather_adaptation": 69.3,
+            "track_trait_fit": 50.56,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "Franco Colapinto",
+          "team": "Alpine F1 Team",
+          "driver_id": "colapinto",
+          "score": 44.13,
+          "confidence": 50.2,
+          "reason": "pit-stop execution; car performance; team strategy gain; same-circuit history; regulation-era fit",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 5.0,
+            "driver_skill": 26.21,
+            "car_performance": 37.99,
+            "constructor_form": 28.72,
+            "current_season_car_performance": 47.55,
+            "current_season_recent_form": 33.31,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": null,
+            "regulation_fit": 46.82,
+            "calendar_confidence": 80,
+            "recent_result": 66.67,
+            "qualifying": null,
+            "circuit_history": 42.86,
+            "race_pace": null,
+            "pit_execution": 71.44,
+            "team_strategy": 64.51,
+            "reliability": 55.0,
+            "team_track_fit": 52.61,
+            "weather_adaptation": 53.58,
+            "track_trait_fit": 50.32,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        },
+        {
+          "name": "Fernando Alonso",
+          "team": "Aston Martin",
+          "driver_id": "alonso",
+          "score": 43.74,
+          "confidence": 50.2,
+          "reason": "same-circuit history; pit-stop execution; team strategy gain; regulation-era fit; reliability",
+          "component_scores": {
+            "ml_win_probability": null,
+            "ml_podium_probability": null,
+            "ml_top10_probability": null,
+            "driver_form": 0.0,
+            "driver_skill": 40.75,
+            "car_performance": 22.89,
+            "constructor_form": 10.8,
+            "current_season_car_performance": 23.29,
+            "current_season_recent_form": 12.79,
+            "openf1_session_result": null,
+            "openf1_starting_grid": null,
+            "openf1_lap_pace": null,
+            "openf1_pit_execution": null,
+            "openf1_stint_strength": null,
+            "openf1_telemetry_speed": null,
+            "openf1_car_performance": null,
+            "upgrade_package_impact": null,
+            "regulation_fit": 48.03,
+            "calendar_confidence": 80,
+            "recent_result": 33.33,
+            "qualifying": null,
+            "circuit_history": 76.39,
+            "race_pace": null,
+            "pit_execution": 76.57,
+            "team_strategy": 68.35,
+            "reliability": 90.0,
+            "team_track_fit": 58.25,
+            "weather_adaptation": 80.33,
+            "track_trait_fit": 48.62,
+            "sprint_performance": null,
+            "fastf1_race_pace": null,
+            "fastf1_consistency": null,
+            "fastf1_tyre_stint": null
+          },
+          "image": null,
+          "team_colour": null
+        }
+      ],
+      "prediction_model": {
+        "source": "Hybrid full-data cache model: Jolpica full history + OpenF1 when free/working + FastF1 + Open-Meteo + ICS",
+        "logic": "Mintlify-style feature groups plus full-data racing ensemble: grid, driver history, current-season car performance, team form, car telemetry, circuit experience, track traits, weather traits, tyre strategy, lap pace, pit stops, sprint, reliability, and race simulation scenarios",
+        "prediction_stage": "pre-weekend",
+        "weights": {
+          "ml_win_probability": 0.0376,
+          "ml_podium_probability": 0.0563,
+          "ml_top10_probability": 0.0282,
+          "driver_form": 0.0469,
+          "driver_skill": 0.0282,
+          "car_performance": 0.0657,
+          "constructor_form": 0.0329,
+          "recent_result": 0.0235,
+          "qualifying": 0.0376,
+          "circuit_history": 0.0423,
+          "race_pace": 0.0704,
+          "pit_execution": 0.0376,
+          "team_strategy": 0.0376,
+          "reliability": 0.0188,
+          "team_track_fit": 0.0282,
+          "weather_adaptation": 0.0188,
+          "track_trait_fit": 0.0329,
+          "sprint_performance": 0.0141,
+          "current_season_car_performance": 0.0282,
+          "current_season_recent_form": 0.0188,
+          "openf1_session_result": 0.0188,
+          "openf1_starting_grid": 0.0188,
+          "openf1_lap_pace": 0.0235,
+          "openf1_pit_execution": 0.0141,
+          "openf1_stint_strength": 0.0141,
+          "openf1_telemetry_speed": 0.0188,
+          "openf1_car_performance": 0.0329,
+          "upgrade_package_impact": 0.0469,
+          "regulation_fit": 0.0376,
+          "calendar_confidence": 0.0047,
+          "fastf1_race_pace": 0.0282,
+          "fastf1_consistency": 0.0141,
+          "fastf1_tyre_stint": 0.0235
+        },
+        "available_components": {
+          "ml_outputs": 0,
+          "driver_form": 22,
+          "constructor_form": 11,
+          "current_season_car_performance": 11,
+          "current_season_recent_form": 11,
+          "openf1_provider_status": "used",
+          "openf1_car_performance": 0,
+          "openf1_telemetry_speed": 0,
+          "upgrade_provider_status": "official_upgrade_data_used",
+          "upgrade_package_impact": 5,
+          "regulation_era": "2026+ active-aero and new power-unit era",
+          "official_calendar_status": "official_f1_calendar_page_reachable",
+          "recent_result": 22,
+          "qualifying": 0,
+          "sprint": 0,
+          "circuit_history": 30,
+          "race_pace": 0,
+          "pit_execution_drivers": 28,
+          "strategy_drivers": 30,
+          "reliability": 30,
+          "fastf1_sessions_loaded": [],
+          "backfill_used_this_run": 0
+        },
+        "prediction_stage_label": "Race prediction, Pre-weekend prediction",
+        "output_target_type": "race",
+        "ml_model_loaded": false,
+        "ml_model_meta": {
+          "trained_at": null,
+          "latest_completed_race_id": null,
+          "metrics": null
+        }
+      },
+      "upgrade_context": {
+        "provider_status": "official_upgrade_data_used",
+        "sources": [
+          "https://www.fia.com/news/f1-tech-updates-canadian-grand-prix",
+          "https://www.fia.com/news/f1-tech-updates-canadian-gp",
+          "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-grand-prix",
+          "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-gp"
+        ],
+        "team_scores": {
+          "Audi": 40,
+          "Ferrari": 40,
+          "McLaren": 40,
+          "Mercedes": 40,
+          "Red Bull": 40
+        },
+        "team_traits": {
+          "Alpine F1 Team": {},
+          "Aston Martin": {},
+          "Audi": {
+            "straight_line": 12,
+            "power_efficiency": 12
+          },
+          "Cadillac F1 Team": {},
+          "Ferrari": {
+            "power_efficiency": 12
+          },
+          "Haas F1 Team": {},
+          "McLaren": {
+            "power_efficiency": 12
+          },
+          "Mercedes": {
+            "power_efficiency": 12
+          },
+          "RB F1 Team": {},
+          "Red Bull": {
+            "power_efficiency": 12
+          },
+          "Williams": {}
+        },
+        "notes": [
+          {
+            "team": "Audi",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-grand-prix",
+            "components": [
+              "ers",
+              "monza"
+            ],
+            "excerpt": "NGE 2025 - REGION 1 FIA INNOVATION CHALLENGE 2026 - REGION 4 Paris ePrix Turkish Grand Prix WorldRX of Germany WorldRX of Norway Emilia Romagna Grand Prix Race of Belgium Race of Most Race of Zolder Rallye de France WorldRX of Barcelona Ypres Rally Berlin E-Prix FIA INNOVATION CHALLENGE 2025 - REGION 4 Health & Safety Masters Sportscar One Road Race of Barcelona F3 Race of France F2 Race of Hungaroring F2 Race of Jar"
+          },
+          {
+            "team": "Ferrari",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-grand-prix",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "promoter, the decision has been taken to move... Read more Sport 03.05.26 F1 - Antonelli claims pole for Miami Grand Prix as Verstappen seals front-row spot ahead of Leclerc Kimi Antonelli claimed pole position for the 2026 FIA Formula One Miami Grand Prix, the Mercedes... Read more Sport 02.05.26 F1 - 2026 Miami Grand Prix Post-Sprint Press Conference Transcript DRIVERS 1 – Lando NORRIS (McLaren) 2 – Oscar PIASTRI ("
+          },
+          {
+            "team": "McLaren",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-grand-prix",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "an Cup International Hill Climb Cup FIA ETCR eTouring Car World Cup European Hill Climb Cup Sport 04.05.26 Spain’s Baja TT Cuenca to kickstart the FIA European Baja Cup for the first time Spain’s Baja TT Cuenca will host the opening round of the FIA European Baja Cup for the first time on May 7th-10th. Read more Sport 03.05.26 F1 - 2026 Miami Grand Prix Post-Race Press Conference Transcript DRIVERS 1 – Kimi ANTONELLI"
+          },
+          {
+            "team": "Mercedes",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-grand-prix",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "IA Historic Formula 3 European Cup International Hill Climb Cup FIA ETCR eTouring Car World Cup European Hill Climb Cup Sport 04.05.26 Spain’s Baja TT Cuenca to kickstart the FIA European Baja Cup for the first time Spain’s Baja TT Cuenca will host the opening round of the FIA European Baja Cup for the first time on May 7th-10th. Read more Sport 03.05.26 F1 - 2026 Miami Grand Prix Post-Race Press Conference Transcrip"
+          },
+          {
+            "team": "Red Bull",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-grand-prix",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "RICA FIA PRESIDENT’S AWARD 2025 – COMMUNICATIONS – SOUTH AMERICA FIA PRESIDENT’S AWARD 2025 – MOTORSPORT – EUROPE FIA PRESIDENT’S AWARD 2025 – MOTORSPORT – NORTH AMERICA Institute International Hill Climb Las Vegas GP Miami ePrix Monaco E-Prix Race of Czech Republic Race of Jerez F2 Race of Thailand Rally Moritz Costa Brava Regional Meetings Tuscan Grand Prix WCAMT WroldRX 70th Anniversary GP 690 Circuit of Ireland I"
+          },
+          {
+            "team": "Audi",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-gp",
+            "components": [
+              "ers",
+              "monza"
+            ],
+            "excerpt": "NGE 2025 - REGION 1 FIA INNOVATION CHALLENGE 2026 - REGION 4 Paris ePrix Turkish Grand Prix WorldRX of Germany WorldRX of Norway Emilia Romagna Grand Prix Race of Belgium Race of Most Race of Zolder Rallye de France WorldRX of Barcelona Ypres Rally Berlin E-Prix FIA INNOVATION CHALLENGE 2025 - REGION 4 Health & Safety Masters Sportscar One Road Race of Barcelona F3 Race of France F2 Race of Hungaroring F2 Race of Jar"
+          },
+          {
+            "team": "Ferrari",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-gp",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "promoter, the decision has been taken to move... Read more Sport 03.05.26 F1 - Antonelli claims pole for Miami Grand Prix as Verstappen seals front-row spot ahead of Leclerc Kimi Antonelli claimed pole position for the 2026 FIA Formula One Miami Grand Prix, the Mercedes... Read more Sport 02.05.26 F1 - 2026 Miami Grand Prix Post-Sprint Press Conference Transcript DRIVERS 1 – Lando NORRIS (McLaren) 2 – Oscar PIASTRI ("
+          },
+          {
+            "team": "McLaren",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-gp",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "an Cup International Hill Climb Cup FIA ETCR eTouring Car World Cup European Hill Climb Cup Sport 04.05.26 Spain’s Baja TT Cuenca to kickstart the FIA European Baja Cup for the first time Spain’s Baja TT Cuenca will host the opening round of the FIA European Baja Cup for the first time on May 7th-10th. Read more Sport 03.05.26 F1 - 2026 Miami Grand Prix Post-Race Press Conference Transcript DRIVERS 1 – Kimi ANTONELLI"
+          },
+          {
+            "team": "Mercedes",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-gp",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "IA Historic Formula 3 European Cup International Hill Climb Cup FIA ETCR eTouring Car World Cup European Hill Climb Cup Sport 04.05.26 Spain’s Baja TT Cuenca to kickstart the FIA European Baja Cup for the first time Spain’s Baja TT Cuenca will host the opening round of the FIA European Baja Cup for the first time on May 7th-10th. Read more Sport 03.05.26 F1 - 2026 Miami Grand Prix Post-Race Press Conference Transcrip"
+          },
+          {
+            "team": "Red Bull",
+            "source": "https://www.fia.com/news/f1-tech-updates-canadian-gp",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "RICA FIA PRESIDENT’S AWARD 2025 – COMMUNICATIONS – SOUTH AMERICA FIA PRESIDENT’S AWARD 2025 – MOTORSPORT – EUROPE FIA PRESIDENT’S AWARD 2025 – MOTORSPORT – NORTH AMERICA Institute International Hill Climb Las Vegas GP Miami ePrix Monaco E-Prix Race of Czech Republic Race of Jerez F2 Race of Thailand Rally Moritz Costa Brava Regional Meetings Tuscan Grand Prix WCAMT WroldRX 70th Anniversary GP 690 Circuit of Ireland I"
+          },
+          {
+            "team": "Audi",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-grand-prix",
+            "components": [
+              "ers",
+              "monza"
+            ],
+            "excerpt": "NGE 2025 - REGION 1 FIA INNOVATION CHALLENGE 2026 - REGION 4 Paris ePrix Turkish Grand Prix WorldRX of Germany WorldRX of Norway Emilia Romagna Grand Prix Race of Belgium Race of Most Race of Zolder Rallye de France WorldRX of Barcelona Ypres Rally Berlin E-Prix FIA INNOVATION CHALLENGE 2025 - REGION 4 Health & Safety Masters Sportscar One Road Race of Barcelona F3 Race of France F2 Race of Hungaroring F2 Race of Jar"
+          },
+          {
+            "team": "Ferrari",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-grand-prix",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "promoter, the decision has been taken to move... Read more Sport 03.05.26 F1 - Antonelli claims pole for Miami Grand Prix as Verstappen seals front-row spot ahead of Leclerc Kimi Antonelli claimed pole position for the 2026 FIA Formula One Miami Grand Prix, the Mercedes... Read more Sport 02.05.26 F1 - 2026 Miami Grand Prix Post-Sprint Press Conference Transcript DRIVERS 1 – Lando NORRIS (McLaren) 2 – Oscar PIASTRI ("
+          },
+          {
+            "team": "McLaren",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-grand-prix",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "an Cup International Hill Climb Cup FIA ETCR eTouring Car World Cup European Hill Climb Cup Sport 04.05.26 Spain’s Baja TT Cuenca to kickstart the FIA European Baja Cup for the first time Spain’s Baja TT Cuenca will host the opening round of the FIA European Baja Cup for the first time on May 7th-10th. Read more Sport 03.05.26 F1 - 2026 Miami Grand Prix Post-Race Press Conference Transcript DRIVERS 1 – Kimi ANTONELLI"
+          },
+          {
+            "team": "Mercedes",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-grand-prix",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "IA Historic Formula 3 European Cup International Hill Climb Cup FIA ETCR eTouring Car World Cup European Hill Climb Cup Sport 04.05.26 Spain’s Baja TT Cuenca to kickstart the FIA European Baja Cup for the first time Spain’s Baja TT Cuenca will host the opening round of the FIA European Baja Cup for the first time on May 7th-10th. Read more Sport 03.05.26 F1 - 2026 Miami Grand Prix Post-Race Press Conference Transcrip"
+          },
+          {
+            "team": "Red Bull",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-grand-prix",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "RICA FIA PRESIDENT’S AWARD 2025 – COMMUNICATIONS – SOUTH AMERICA FIA PRESIDENT’S AWARD 2025 – MOTORSPORT – EUROPE FIA PRESIDENT’S AWARD 2025 – MOTORSPORT – NORTH AMERICA Institute International Hill Climb Las Vegas GP Miami ePrix Monaco E-Prix Race of Czech Republic Race of Jerez F2 Race of Thailand Rally Moritz Costa Brava Regional Meetings Tuscan Grand Prix WCAMT WroldRX 70th Anniversary GP 690 Circuit of Ireland I"
+          },
+          {
+            "team": "Audi",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-gp",
+            "components": [
+              "ers",
+              "monza"
+            ],
+            "excerpt": "NGE 2025 - REGION 1 FIA INNOVATION CHALLENGE 2026 - REGION 4 Paris ePrix Turkish Grand Prix WorldRX of Germany WorldRX of Norway Emilia Romagna Grand Prix Race of Belgium Race of Most Race of Zolder Rallye de France WorldRX of Barcelona Ypres Rally Berlin E-Prix FIA INNOVATION CHALLENGE 2025 - REGION 4 Health & Safety Masters Sportscar One Road Race of Barcelona F3 Race of France F2 Race of Hungaroring F2 Race of Jar"
+          },
+          {
+            "team": "Ferrari",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-gp",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "promoter, the decision has been taken to move... Read more Sport 03.05.26 F1 - Antonelli claims pole for Miami Grand Prix as Verstappen seals front-row spot ahead of Leclerc Kimi Antonelli claimed pole position for the 2026 FIA Formula One Miami Grand Prix, the Mercedes... Read more Sport 02.05.26 F1 - 2026 Miami Grand Prix Post-Sprint Press Conference Transcript DRIVERS 1 – Lando NORRIS (McLaren) 2 – Oscar PIASTRI ("
+          },
+          {
+            "team": "McLaren",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-gp",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "an Cup International Hill Climb Cup FIA ETCR eTouring Car World Cup European Hill Climb Cup Sport 04.05.26 Spain’s Baja TT Cuenca to kickstart the FIA European Baja Cup for the first time Spain’s Baja TT Cuenca will host the opening round of the FIA European Baja Cup for the first time on May 7th-10th. Read more Sport 03.05.26 F1 - 2026 Miami Grand Prix Post-Race Press Conference Transcript DRIVERS 1 – Kimi ANTONELLI"
+          },
+          {
+            "team": "Mercedes",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-gp",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "IA Historic Formula 3 European Cup International Hill Climb Cup FIA ETCR eTouring Car World Cup European Hill Climb Cup Sport 04.05.26 Spain’s Baja TT Cuenca to kickstart the FIA European Baja Cup for the first time Spain’s Baja TT Cuenca will host the opening round of the FIA European Baja Cup for the first time on May 7th-10th. Read more Sport 03.05.26 F1 - 2026 Miami Grand Prix Post-Race Press Conference Transcrip"
+          },
+          {
+            "team": "Red Bull",
+            "source": "https://www.fia.com/news/f1-tech-updates-circuit-gilles-villeneuve-gp",
+            "components": [
+              "ers"
+            ],
+            "excerpt": "RICA FIA PRESIDENT’S AWARD 2025 – COMMUNICATIONS – SOUTH AMERICA FIA PRESIDENT’S AWARD 2025 – MOTORSPORT – EUROPE FIA PRESIDENT’S AWARD 2025 – MOTORSPORT – NORTH AMERICA Institute International Hill Climb Las Vegas GP Miami ePrix Monaco E-Prix Race of Czech Republic Race of Jerez F2 Race of Thailand Rally Moritz Costa Brava Regional Meetings Tuscan Grand Prix WCAMT WroldRX 70th Anniversary GP 690 Circuit of Ireland I"
+          }
+        ]
+      },
+      "regulation_context": {
+        "era": "2026+ active-aero and new power-unit era",
+        "notes": [
+          "The FIA/F1 2026 rules introduce smaller, lighter cars, reduced drag/downforce targets, active aerodynamics, more electrical power, sustainable fuels, and Manual Override Mode.",
+          "Prediction should reward efficient aero switching, straight-line efficiency, energy deployment, traction, braking stability, reliability, and driver adaptability."
+        ],
+        "boost_traits": [
+          "aero_efficiency",
+          "straight_line",
+          "power_efficiency",
+          "stability",
+          "traction",
+          "braking",
+          "reliability"
+        ],
+        "source_urls": [
+          "https://www.fia.com/news/new-era-competition-fia-showcases-future-focused-formula-1-regulations-2026-and-beyond"
+        ]
+      },
+      "official_calendar_context": {
+        "enabled": true,
+        "source": "Jolpica/ICS primary",
+        "official_url": "https://www.formula1.com/en/racing/2026",
+        "status": "official_f1_calendar_page_reachable",
+        "race_name_seen": false
+      },
+      "prompt_requirement_checklist": [
+        "cache_first_backfill_for_github",
+        "use_local_full_cache_after_manual_download",
+        "openf1_if_free_and_working_else_fallback",
+        "jolpica_fastf1_openmeteo_core",
+        "current_season_car_performance",
+        "recent_constructor_form",
+        "team_upgrade_package_impact",
+        "trusted_upgrade_sources",
+        "track_traits_downforce_straightline_traction_braking_tyre_overtaking",
+        "weather_traits_rain_heat_wind_cloud_historical_weather",
+        "driver_skill_form_reliability_circuit_history_recent_results",
+        "qualifying_grid_sprint_lap_pace_pit_execution_strategy_gain",
+        "f1_regulation_context_2025_2026_2027_and_future_safe",
+        "official_calendar_or_jolpica_fallback",
+        "season_change_resilience_uses_previous_data_when_current_missing",
+        "email_issue_markdown_dashboard_json"
+      ],
+      "dynamic_track_source": {
+        "source": "Jolpica full cached history + Open-Meteo + optional FastF1",
+        "used_full_race_cache": true,
+        "used_open_meteo_archive": true
+      },
+      "dynamic_track_metrics": {
+        "historical_races_sampled": 5,
+        "average_overtake_delta": 3.95,
+        "average_stops_per_driver": 1.6111111111111114,
+        "dnf_rate": 0.26999999999999996,
+        "lap_consistency": null,
+        "backfill_used_this_run": 0,
+        "backfilled_races_this_run": []
+      },
+      "dynamic_reasons": {
+        "overtaking": "average grid-to-finish movement around 3.95",
+        "tyre_stress": "historical average around 1.6111111111111114 stops per driver",
+        "safety_car": "non-finish proxy rate around 27.0%",
+        "speed_profile": "car trait inferred as balanced aero, traction, braking, and tyre management"
+      }
+    },
+    {
       "title": "F1 Briefing: F1 Canadian GP - Practice 1",
       "path": "briefings/2026-05-22-f1-canadian-gp-practice-1.md",
       "generated": "2026-05-04 05:43 IST",
