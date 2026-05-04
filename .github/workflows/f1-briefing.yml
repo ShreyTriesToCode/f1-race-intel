@@ -150,36 +150,50 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Refresh remote state. This prevents rejected pushes when main moved.
-          git fetch origin main
+          echo "Git state after generation:"
+          git status --short
 
-          # If f1_briefing.py made a local commit despite AUTO_COMMIT_ENABLED=false,
-          # rebase that commit onto the current remote before pushing.
-          if ! git rebase origin/main; then
-            echo "Rebase conflict occurred. Generated files will prefer this run's local output."
-            git status --short
-            for file in briefings/latest-run-status.md briefings/index.json data_cache/latest-model-debug.json MODEL_STATUS.md; do
-              if [ -e "$file" ]; then
-                git checkout --ours "$file" || true
-                git add "$file" || true
-              fi
-            done
-            git rebase --continue || {
-              echo "Automatic rebase recovery failed."
-              git rebase --abort || true
-              exit 1
-            }
-          fi
-
-          # Commit readable outputs and reusable caches. Keeping caches in the repo is intentional
-          # for this project, so future runs do not need to redownload as much data.
+          # Stage outputs first. The previous workflow failed because it tried to rebase
+          # while fastf1_cache/data_cache had unstaged changes.
           git add briefings MODEL_STATUS.md data_cache/latest-model-debug.json 2>/dev/null || true
           git add data_cache/http data_cache/full_races models/saved_models fastf1_cache 2>/dev/null || true
 
           if ! git diff --cached --quiet; then
             git commit -m "chore: update f1 race intel outputs"
           else
-            echo "No generated file changes to commit."
+            echo "No generated file changes to commit before sync."
+          fi
+
+          # Now sync with remote only after the worktree is clean.
+          git fetch origin main
+
+          if [ "$(git rev-list --count HEAD..origin/main)" -gt 0 ]; then
+            echo "Remote has new commits. Rebasing local generated commits."
+            if ! git rebase origin/main; then
+              echo "Rebase conflict occurred. Keeping this run's generated output for generated files."
+              git status --short
+
+              for file in briefings/latest-run-status.md briefings/index.json data_cache/latest-model-debug.json MODEL_STATUS.md; do
+                if [ -e "$file" ]; then
+                  git checkout --ours "$file" || true
+                  git add "$file" || true
+                fi
+              done
+
+              git add data_cache/http data_cache/full_races models/saved_models fastf1_cache 2>/dev/null || true
+
+              if ! git diff --cached --quiet; then
+                git commit --no-edit || true
+              fi
+
+              git rebase --continue || {
+                echo "Automatic rebase recovery failed."
+                git rebase --abort || true
+                exit 1
+              }
+            fi
+          else
+            echo "Remote is not ahead. No rebase needed."
           fi
 
           if [ "$(git rev-list --count origin/main..HEAD)" -gt 0 ]; then
