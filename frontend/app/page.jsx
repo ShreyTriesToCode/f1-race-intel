@@ -193,7 +193,7 @@ function TeamCar({ team }) {
   const [failed, setFailed] = useState(false);
   const src = teamCar(team);
   if (!src || failed) return <span className="team-fallback">{initials(team)}</span>;
-  return <img src={src} alt={`${team} car`} onError={() => setFailed(true)} />;
+  return <img className="team-car" src={src} alt={`${team} car`} onError={() => setFailed(true)} />;
 }
 
 function TargetTabs({ targets, activeIndex, setActiveIndex }) {
@@ -329,7 +329,8 @@ export default function Home() {
           </div>
         </div>
         <div className="nav-actions">
-          <a href={OFFICIAL_LINKS.timing} target="_blank" rel="noreferrer"><Timer size={15} /> Live timing</a>
+          <a href="/live"><Timer size={15} /> Live page</a>
+          <a href={OFFICIAL_LINKS.timing} target="_blank" rel="noreferrer"><Timer size={15} /> F1 timing</a>
           <a href={OFFICIAL_LINKS.schedule} target="_blank" rel="noreferrer"><CalendarDays size={15} /> Calendar</a>
           <button onClick={() => loadIndex().catch(() => setStatus("Refresh failed"))}><RefreshCw size={15} /> Refresh</button>
         </div>
