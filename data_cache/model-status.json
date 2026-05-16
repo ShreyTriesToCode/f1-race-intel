@@ -2,7 +2,7 @@
   "schema_version": "2026.05-high-accuracy-v4",
   "model_version": "2026.05-high-accuracy-v4",
   "prediction_data_version": "2026.05-race-control-contract-v1",
-  "generated_at": "2026-05-16T15:52:21.617428+05:30",
+  "generated_at": "2026-05-16T18:50:26.327447+05:30",
   "trained_at": "2026-05-14T19:53:46.927668+05:30",
   "latest_completed_race_included": "2026-4",
   "latest_available_api_result": "2026-4",
@@ -213,7 +213,7 @@
     "blockers": []
   },
   "readiness_state": {
-    "checked_at": "2026-05-16T15:49:07.013902+05:30",
+    "checked_at": "2026-05-16T18:50:22.497908+05:30",
     "current_year": 2026,
     "final_results_delay_hours": 8,
     "latest_completed_race_id": "2026-4",
@@ -240,19 +240,8 @@
     },
     "status": "latest_results_available"
   },
-  "mode": "weekend",
-  "selected_targets": [
-    {
-      "target_type": "sprint",
-      "title": "F1 Canadian GP - Sprint Race",
-      "start": "2026-05-23 21:30:00+05:30"
-    },
-    {
-      "target_type": "race",
-      "title": "F1 Canadian GP - Race",
-      "start": "2026-05-25 01:30:00+05:30"
-    }
-  ],
+  "mode": "today",
+  "selected_targets": [],
   "errors": [],
   "limitations": [
     "Live race adjustments only become official model output when timing data and generated contracts are refreshed.",
