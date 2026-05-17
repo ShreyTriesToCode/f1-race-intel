@@ -2,7 +2,7 @@
   "schema_version": "2026.05-high-accuracy-v4",
   "model_version": "2026.05-high-accuracy-v4",
   "prediction_data_version": "2026.05-race-control-contract-v1",
-  "generated_at": "2026-05-17T00:33:28.107994+05:30",
+  "generated_at": "2026-05-17T08:27:14.380429+05:30",
   "trained_at": "2026-05-14T19:53:46.927668+05:30",
   "latest_completed_race_included": "2026-4",
   "latest_available_api_result": "2026-4",
@@ -213,7 +213,7 @@
     "blockers": []
   },
   "readiness_state": {
-    "checked_at": "2026-05-17T00:33:24.241305+05:30",
+    "checked_at": "2026-05-17T08:27:10.747754+05:30",
     "current_year": 2026,
     "final_results_delay_hours": 8,
     "latest_completed_race_id": "2026-4",
